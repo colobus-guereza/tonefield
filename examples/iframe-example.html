@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>톤필드 3D 좌표계 임베드 예제</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        .controls {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f9f9f9;
+            border-radius: 4px;
+        }
+        .control-group {
+            margin-bottom: 10px;
+        }
+        label {
+            display: inline-block;
+            width: 150px;
+            font-weight: bold;
+        }
+        input, select {
+            padding: 5px;
+            margin-right: 10px;
+        }
+        button {
+            padding: 8px 16px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        iframe {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>톤필드 3D 좌표계 임베드 예제</h1>
+        
+        <div class="controls">
+            <h3>설정</h3>
+            <div class="control-group">
+                <label>Tension:</label>
+                <input type="range" id="tension" min="0" max="1" step="0.01" value="0.5">
+                <span id="tensionValue">0.5</span>
+            </div>
+            <div class="control-group">
+                <label>Wireframe:</label>
+                <select id="wireframe">
+                    <option value="true">켜기</option>
+                    <option value="false">끄기</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>Camera View:</label>
+                <select id="cameraView">
+                    <option value="top">위에서 보기</option>
+                    <option value="perspective">원근법</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>타점 위치:</label>
+                <select id="hitPointLocation">
+                    <option value="">없음</option>
+                    <option value="internal">내부</option>
+                    <option value="external">외부</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>타점 좌표:</label>
+                <input type="text" id="hitPointCoordinate" placeholder="(0.2, -0.3)" style="width: 200px;">
+            </div>
+            <div class="control-group">
+                <label>강도:</label>
+                <input type="text" id="hitPointStrength" placeholder="25.5" style="width: 100px;">
+            </div>
+            <div class="control-group">
+                <label>타수:</label>
+                <input type="text" id="hitPointCount" placeholder="2" style="width: 100px;">
+            </div>
+            <div class="control-group">
+                <label>해머링 타입:</label>
+                <input type="text" id="hammeringType" placeholder="튕겨치기" style="width: 150px;">
+            </div>
+            <button onclick="updateIframe()">적용</button>
+        </div>
+
+        <iframe 
+            id="tonefield-iframe"
+            src="http://localhost:3003/embed" 
+            width="100%" 
+            height="600px"
+            frameborder="0">
+        </iframe>
+    </div>
+
+    <script>
+        // Tension 슬라이더 값 표시
+        document.getElementById('tension').addEventListener('input', function(e) {
+            document.getElementById('tensionValue').textContent = e.target.value;
+        });
+
+        // iframe 업데이트 함수
+        function updateIframe() {
+            const iframe = document.getElementById('tonefield-iframe');
+            const params = new URLSearchParams({
+                tension: document.getElementById('tension').value,
+                wireframe: document.getElementById('wireframe').value,
+                cameraView: document.getElementById('cameraView').value,
+            });
+
+            const hitPointLocation = document.getElementById('hitPointLocation').value;
+            const hitPointCoordinate = document.getElementById('hitPointCoordinate').value;
+            const hitPointStrength = document.getElementById('hitPointStrength').value;
+            const hitPointCount = document.getElementById('hitPointCount').value;
+            const hammeringType = document.getElementById('hammeringType').value;
+
+            if (hitPointLocation) params.set('hitPointLocation', hitPointLocation);
+            if (hitPointCoordinate) params.set('hitPointCoordinate', hitPointCoordinate);
+            if (hitPointStrength) params.set('hitPointStrength', hitPointStrength);
+            if (hitPointCount) params.set('hitPointCount', hitPointCount);
+            if (hammeringType) params.set('hammeringType', hammeringType);
+
+            iframe.src = `http://localhost:3003/embed?${params.toString()}`;
+        }
+
+        // 초기 로드 시 자동 업데이트
+        window.onload = function() {
+            updateIframe();
+        };
+    </script>
+</body>
+</html>
+
