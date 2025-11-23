@@ -161,7 +161,8 @@ function ToneFieldMesh({
     wireframe,
     meshRef,
     tuningErrors,
-    hitPointLocation
+    hitPointLocation,
+    hitPointCoordinate
 }: {
     tension: number;
     wireframe: boolean;
@@ -172,6 +173,7 @@ function ToneFieldMesh({
         fifth: number;
     };
     hitPointLocation?: "internal" | "external" | null;
+    hitPointCoordinate?: string;
 }) {
 
     // Parameters for the ellipse
@@ -218,6 +220,27 @@ function ToneFieldMesh({
 
         // 🔍 디버깅: tuningErrors 값 로그
         console.log('🎨 ToneFieldMesh - tuningErrors:', tuningErrors);
+
+        // 타점 좌표 파싱 (Directional Weighting용)
+        let targetX = 0;
+        let targetY = 0;
+        let hasTarget = false;
+
+        if (hitPointCoordinate) {
+            const match = hitPointCoordinate.match(/\(([^,]+),\s*([^)]+)\)/);
+            if (match) {
+                targetX = parseFloat(match[1]);
+                targetY = parseFloat(match[2]);
+                hasTarget = true;
+            }
+        }
+
+        // 🔍 디버깅: 타점 좌표 확인
+        console.log('🎨 ToneFieldMesh - hitPointCoordinate:', hitPointCoordinate);
+        console.log('🎨 ToneFieldMesh - Parsed Target:', { hasTarget, targetX, targetY });
+
+        // 타점 벡터의 각도 (Target Angle)
+        const targetAngle = hasTarget ? Math.atan2(targetY, targetX) : 0;
 
         for (let i = 0; i < count; i++) {
             const x = posAttr.getX(i);
@@ -266,14 +289,42 @@ function ToneFieldMesh({
             // (+값과 -값이 만나서 0에 가까워지면 자동으로 초록색이 됨)
             const { color: baseColor, brightness } = getErrorColor(mixedError);
 
-            // 밝기 적용 (색상 * 밝기)
-            color.copy(baseColor).multiplyScalar(brightness);
+            // 3. 스포트라이트 효과 적용 (Spotlight Effect)
+            // 영역(Zone)은 고정하고, 타점 주변만 밝게 강조
+            let finalBrightness = brightness;
+
+            if (hasTarget) {
+                // 타점과 현재 버텍스 사이의 거리 계산
+                // 정규화된 좌표계 사용 (x: -0.3~0.3, y: -0.425~0.425)
+                const dx = x - targetX;
+                const dy = y - targetY;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+
+                // 거리 기반 감쇠 (Distance Attenuation) - 더 극적인 효과를 위해 조정
+                // [사용자 조절 가이드]
+                // 1. maxBrightness: 타점 중심의 최대 밝기 (현재 2.0 = 200%)
+                // 2. minBrightness: 타점 반대편의 최소 밝기 (현재 0.1 = 10%)
+                // 3. falloffFactor: 밝기가 어두워지는 속도 (클수록 급격히 어두워짐, 현재 3.0)
+
+                const maxBrightness = 2.0;
+                const minBrightness = 0.1;
+                const falloffFactor = 3.0;
+
+                // distance 0 -> factor = maxBrightness (2.0)
+                // distance가 커질수록 급격히 감소하여 minBrightness (0.1)로 수렴
+                const spotlightFactor = Math.max(minBrightness, maxBrightness - distance * falloffFactor);
+
+                finalBrightness = brightness * spotlightFactor;
+            }
+
+            // 밝기 적용 (색상 * 최종 밝기)
+            color.copy(baseColor).multiplyScalar(finalBrightness);
 
             colorAttr.setXYZ(i, color.r, color.g, color.b);
 
             // 🔍 디버깅: 일부 버텍스 색상 샘플링
             if (i % 200 === 0) {
-                console.log(`  버텍스 ${i}: MixedError:${mixedError.toFixed(2)}Hz Brightness:${brightness.toFixed(2)}`);
+                console.log(`  버텍스 ${i}: MixedError:${mixedError.toFixed(2)}Hz Brightness:${finalBrightness.toFixed(2)}`);
             }
         }
 
@@ -284,7 +335,7 @@ function ToneFieldMesh({
 
         // 노말 재계산 (z 값이 변경되었으므로)
         geo.computeVertexNormals();
-    }, [geometry, tuningErrors, meshRef, hitPointLocation]);  // tension 제거 - tuningErrors만으로 색상 제어
+    }, [geometry, tuningErrors, meshRef, hitPointLocation, hitPointCoordinate]);  // hitPointCoordinate 추가
 
     useFrame((state) => {
         if (!meshRef.current) return;
@@ -509,9 +560,10 @@ function TonefieldBoundaries({ hitPointLocation }: { hitPointLocation: "internal
 function LocationText({ hitPointLocation }: { hitPointLocation: "internal" | "external" | null }) {
     if (!hitPointLocation) return null;
 
-    // 딤플 중앙 위치 (메쉬 위로 확실하게 띄움)
+    // 딤플 중앙 위치 (정확히 0, 0, z 위치)
     // 외부일 때는 딤플이 반전되므로 z 위치도 조정
-    const dimpleCenterZ = hitPointLocation === "external" ? -0.2 : 0.2;
+    // 딤플 높이는 약 0.04이므로, 메쉬 위로 약간 띄움
+    const dimpleCenterZ = hitPointLocation === "external" ? -0.05 : 0.05;
 
     return (
         <Html
@@ -524,7 +576,7 @@ function LocationText({ hitPointLocation }: { hitPointLocation: "internal" | "ex
                 userSelect: 'none'
             }}
         >
-            <div className="text-white text-2xl font-bold drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">
+            <div className="text-gray-400/40 text-2xl font-bold drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">
                 {hitPointLocation === "internal" ? "내부" : "외부"}
             </div>
         </Html>
@@ -1423,7 +1475,7 @@ export function ToneField() {
     return (
         <div className="w-full h-screen flex flex-row" style={{ backgroundColor: '#000000' }}>
             {/* Left Panel - Tuning Error Input */}
-            <div className="w-80 bg-gray-900 border-r border-gray-700 flex flex-col z-10 shadow-xl h-full overflow-y-auto">
+            <div className="w-80 border-r border-gray-700 flex flex-col z-10 shadow-xl h-full overflow-y-auto" style={{ backgroundColor: '#000000' }}>
                 <div className="p-4 flex-1">
                     <div className="flex items-center justify-between mb-3">
                         <h2 className="text-lg font-bold text-gray-100">조율오차 입력</h2>
@@ -1453,7 +1505,7 @@ export function ToneField() {
 
                     <div className="space-y-2">
                         {/* Fifth Error (5도) */}
-                        <div>
+                        <div className={tuningTarget !== "5도" && auxiliaryTarget !== "5도" ? "opacity-40" : ""}>
                             <label className={`block text-sm font-medium mb-1 transition-colors ${tuningTarget === "5도"
                                 ? "text-red-400"
                                 : auxiliaryTarget === "5도"
@@ -1487,7 +1539,7 @@ export function ToneField() {
                         </div>
 
                         {/* Octave Error */}
-                        <div>
+                        <div className={tuningTarget !== "옥타브" && auxiliaryTarget !== "옥타브" ? "opacity-40" : ""}>
                             <label className={`block text-sm font-medium mb-1 transition-colors ${tuningTarget === "옥타브"
                                 ? "text-red-400"
                                 : auxiliaryTarget === "옥타브"
@@ -1521,7 +1573,7 @@ export function ToneField() {
                         </div>
 
                         {/* Tonic Error (토닉) */}
-                        <div>
+                        <div className={tuningTarget !== "토닉" && auxiliaryTarget !== "토닉" ? "opacity-40" : ""}>
                             <label className={`block text-sm font-medium mb-1 transition-colors ${tuningTarget === "토닉"
                                 ? "text-red-400"
                                 : auxiliaryTarget === "토닉"
@@ -1756,12 +1808,12 @@ export function ToneField() {
                         wireframe={wireframe}
                         meshRef={toneFieldMeshRef}
                         tuningErrors={{
-                            // 변수명과 실제 의미가 교차됨 주의!
-                            tonic: fifthError,    // fifthError는 "토닉" 값 → tonic 영역(아래쪽 y<0)에 사용
-                            octave: octaveError,  // octaveError는 "옥타브" 값 → octave 영역(위쪽 y>0)에 사용
-                            fifth: tonicError     // tonicError는 "5도" 값 → fifth 영역(좌우 x)에 사용
+                            tonic: fifthError,
+                            octave: octaveError,
+                            fifth: tonicError
                         }}
                         hitPointLocation={hitPointLocation}
+                        hitPointCoordinate={hitPointCoordinate}
                     />
 
 
@@ -1798,52 +1850,57 @@ export function ToneField() {
 
                 {/* Fixed 2D Overlays - Bottom Center Grid (1x2) */}
                 {hitPointCoordinate && (
-                    <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 flex flex-row gap-3 items-center pointer-events-none">
+                    <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 flex flex-row gap-3 items-stretch pointer-events-none">
                         {/* Tuning Errors Box - 좌측 */}
-                        <div className="bg-black/60 backdrop-blur-md rounded-lg border border-gray-500/50 p-3 text-white shadow-xl w-40">
+                        <div className="bg-black/60 backdrop-blur-md rounded-lg border border-gray-500/50 p-3 text-white shadow-xl w-40 flex flex-col justify-center">
                             <div className="space-y-1 text-sm font-mono text-right">
                                 {/* 5도 (Top) */}
-                                <div className={`${tuningTarget === "5도" ? "text-red-400 font-bold" : auxiliaryTarget === "5도" ? "text-red-400/70" : "text-gray-300"}`}>
+                                <div className={`${tuningTarget === "5도" ? "text-red-400 font-bold" : auxiliaryTarget === "5도" ? "text-red-400/70" : "text-gray-300"} ${tuningTarget !== "5도" && auxiliaryTarget !== "5도" ? "opacity-40" : ""}`}>
                                     {tonicError === 0 ? "0" : tonicError > 0 ? `+${tonicError}` : tonicError}
                                 </div>
                                 {/* 옥타브 (Middle) */}
-                                <div className={`${tuningTarget === "옥타브" ? "text-red-400 font-bold" : auxiliaryTarget === "옥타브" ? "text-red-400/70" : "text-gray-300"}`}>
+                                <div className={`${tuningTarget === "옥타브" ? "text-red-400 font-bold" : auxiliaryTarget === "옥타브" ? "text-red-400/70" : "text-gray-300"} ${tuningTarget !== "옥타브" && auxiliaryTarget !== "옥타브" ? "opacity-40" : ""}`}>
                                     {octaveError === 0 ? "0" : octaveError > 0 ? `+${octaveError}` : octaveError}
                                 </div>
                                 {/* 토닉 (Bottom) */}
-                                <div className={`${tuningTarget === "토닉" ? "text-red-400 font-bold" : auxiliaryTarget === "토닉" ? "text-red-400/70" : "text-gray-300"}`}>
+                                <div className={`${tuningTarget === "토닉" ? "text-red-400 font-bold" : auxiliaryTarget === "토닉" ? "text-red-400/70" : "text-gray-300"} ${tuningTarget !== "토닉" && auxiliaryTarget !== "토닉" ? "opacity-40" : ""}`}>
                                     {fifthError === 0 ? "0" : fifthError > 0 ? `+${fifthError}` : fifthError}
                                 </div>
                             </div>
-                            {targetDisplay && (
-                                <div className="mt-2 pt-2 border-t border-white/10 flex justify-end items-center gap-2">
-                                    <div className="text-sm font-bold text-yellow-400">{targetDisplay}</div>
-                                    {hitPointIntent && (
-                                        <div className="text-xs text-cyan-400">{hitPointIntent}</div>
-                                    )}
-                                </div>
-                            )}
                         </div>
 
                         {/* Hit Point Info Box - 우측 */}
-                        <div className="bg-black/60 backdrop-blur-md rounded-lg border border-gray-500/50 p-3 text-white shadow-xl w-40">
-                            <div className="flex flex-col gap-1 text-right">
-                                {/* Row 1: Location */}
-                                <div className="flex justify-end">
-                                    <span className={`font-bold px-1.5 py-0.5 rounded text-xs ${hitPointLocation === "internal" ? "bg-gray-500/30 text-gray-300" : hitPointLocation === "external" ? "bg-gray-500/30 text-gray-300" : "bg-gray-500/30 text-gray-400"}`}>
-                                        {hitPointLocation === "internal" ? "내부" : hitPointLocation === "external" ? "외부" : ""}
-                                    </span>
+                        <div className="bg-black/60 backdrop-blur-md rounded-lg border border-gray-500/50 p-3 text-white shadow-xl w-40 flex flex-col gap-2 text-right">
+                            {/* Row 1: Location */}
+                            <div className="flex justify-end">
+                                <span className={`font-bold px-1.5 py-0.5 rounded text-xs ${hitPointLocation === "internal" ? "bg-gray-500/30 text-gray-300" : hitPointLocation === "external" ? "bg-gray-500/30 text-gray-300" : "bg-gray-500/30 text-gray-400"}`}>
+                                    {hitPointLocation === "internal" ? "내부" : hitPointLocation === "external" ? "외부" : ""}
+                                </span>
+                            </div>
+                            {/* Row 2: 조율대상 + 의도 */}
+                            {targetDisplay && (
+                                <div className="flex justify-end items-center gap-2">
+                                    <div className="text-sm font-bold text-yellow-400">{targetDisplay}</div>
+                                    {hitPointIntent && (
+                                        <div className="text-xs text-white">{hitPointIntent}</div>
+                                    )}
                                 </div>
-                                {/* Row 2: Coordinates */}
-                                <div className="text-xs font-mono text-cyan-400">
-                                    {hitPointCoordinate}
-                                </div>
-                                {/* Row 3: Strength x Count (Type) */}
+                            )}
+                            {/* Row 3: 강도 × 타수 (타법) */}
+                            {hitPointStrength && hitPointCount && (
                                 <div className="text-xs">
                                     <span className="font-mono font-bold text-white">{hitPointStrength} × {hitPointCount}</span>
-                                    <span className="font-bold text-yellow-400 ml-1">({hammeringType})</span>
+                                    {hammeringType && (
+                                        <span className="font-bold text-yellow-400 ml-1">({hammeringType})</span>
+                                    )}
                                 </div>
-                            </div>
+                            )}
+                            {/* Row 4: 좌표 */}
+                            {hitPointCoordinate && (
+                                <div className="text-xs font-mono text-white">
+                                    {hitPointCoordinate}
+                                </div>
+                            )}
                         </div>
                     </div>
                 )}
@@ -1883,8 +1940,8 @@ export function ToneField() {
                     <button
                         onClick={() => setWireframe(!wireframe)}
                         className={`w-10 h-10 rounded-full backdrop-blur-md border transition-colors shadow-lg flex items-center justify-center ${wireframe
-                            ? "bg-cyan-500/80 border-cyan-400/50 text-black hover:bg-cyan-600/80"
-                            : "bg-black/80 border-white/10 text-white hover:bg-black/90"
+                            ? "bg-gray-300/80 border-gray-400/50 text-gray-900 hover:bg-gray-400/80"
+                            : "bg-black/80 border-white/10 text-gray-400 hover:bg-black/90"
                             }`}
                         title={wireframe ? "와이어프레임 ON" : "와이어프레임 OFF"}
                     >
@@ -1905,7 +1962,7 @@ export function ToneField() {
 
             {/* Right Panel - Recent Hit Points */}
             <div className="relative flex-shrink-0" style={{ width: isClient ? rightPanelWidth : `${panelWidth}px` }}>
-                <div className="bg-gray-900 p-6 rounded-lg shadow-lg transition-colors overflow-y-auto h-full">
+                <div className="p-6 rounded-lg shadow-lg transition-colors overflow-y-auto h-full" style={{ backgroundColor: '#000000' }}>
                     <h2 className="text-2xl font-semibold mb-4 text-gray-100 flex items-center gap-2 flex-wrap">
                         최근 타점
                         <span className="text-sm font-normal px-2 py-1 rounded-full bg-gray-700 text-gray-300">
