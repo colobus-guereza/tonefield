@@ -239,7 +239,7 @@ function TonefieldBoundaries({ hitPointLocation }: { hitPointLocation: "internal
         return line;
     }, [color, opacity]);
 
-    // 대각선 4개 (점선, 회색 투명도 100%)
+    // 대각선 4개 (점선, 타원 외곽선과 동일한 색상)
     const diagonalLines = useMemo(() => {
         const outerRadiusX = 0.3;
         const outerRadiusY = 0.425;
@@ -277,12 +277,12 @@ function TonefieldBoundaries({ hitPointLocation }: { hitPointLocation: "internal
                 new THREE.Vector3(-outerX, -outerY, 0)
             ];
 
-            // 첫 번째 선분
+            // 첫 번째 선분 (타원 외곽선과 동일한 색상 사용)
             const geometry1 = new THREE.BufferGeometry().setFromPoints(points1);
             const material1 = new THREE.LineDashedMaterial({
-                color: 0x808080,
+                color: color,
                 transparent: true,
-                opacity: 1.0, // 투명도 100%
+                opacity: opacity,
                 linewidth: 1,
                 dashSize: 0.02,
                 gapSize: 0.01
@@ -291,12 +291,12 @@ function TonefieldBoundaries({ hitPointLocation }: { hitPointLocation: "internal
             line1.computeLineDistances();
             lines.push(line1);
 
-            // 두 번째 선분
+            // 두 번째 선분 (타원 외곽선과 동일한 색상 사용)
             const geometry2 = new THREE.BufferGeometry().setFromPoints(points2);
             const material2 = new THREE.LineDashedMaterial({
-                color: 0x808080,
+                color: color,
                 transparent: true,
-                opacity: 1.0, // 투명도 100%
+                opacity: opacity,
                 linewidth: 1,
                 dashSize: 0.02,
                 gapSize: 0.01
@@ -307,7 +307,7 @@ function TonefieldBoundaries({ hitPointLocation }: { hitPointLocation: "internal
         }
 
         return lines;
-    }, []);
+    }, [color, opacity]);
 
     return (
         <group position={[0, 0, 0.001]}> {/* Slightly above surface (Z-axis) to avoid z-fighting */}
