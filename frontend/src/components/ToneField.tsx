@@ -151,7 +151,7 @@ function ToneFieldMesh({
 }: {
     tension: number;
     wireframe: boolean;
-    meshRef: React.RefObject<THREE.Mesh>;
+    meshRef: React.RefObject<THREE.Mesh | null>;
     tuningErrors?: {
         tonic: number;
         octave: number;
@@ -259,6 +259,7 @@ function ToneFieldMesh({
             const getAngleDiff = (a1: number, a2: number) => {
                 let diff = Math.abs(a1 - a2);
                 if (diff > Math.PI) diff = 2 * Math.PI - diff;
+                return diff;
             };
 
             // 2. 각 영역의 중심축 각도 (Fixed Axes - Physically Correct)
@@ -488,7 +489,7 @@ function DoubleClickHandler({
     meshRef
 }: {
     onDoubleClick: (x: number, y: number) => void;
-    meshRef: React.RefObject<THREE.Mesh>;
+    meshRef: React.RefObject<THREE.Mesh | null>;
 }) {
     const { camera, raycaster, scene, gl } = useThree();
     const [mouse] = useState(() => new THREE.Vector2());

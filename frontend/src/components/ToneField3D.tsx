@@ -385,12 +385,12 @@ function CoordinateGrid() {
                     <lineBasicMaterial color="#808080" transparent opacity={0.3} linewidth={3} />
                 </lineSegments>
 
-                <Text position={[-0.5, 0.02, 0.6]} rotation={[-Math.PI / 2, 0, 0]} fontSize={0.04} color="#808080" opacity={0.3} anchorX="center" anchorY="middle">-1</Text>
-                <Text position={[0, 0.02, 0.6]} rotation={[-Math.PI / 2, 0, 0]} fontSize={0.04} color="#808080" opacity={0.3} anchorX="center" anchorY="middle">0</Text>
-                <Text position={[0.5, 0.02, 0.6]} rotation={[-Math.PI / 2, 0, 0]} fontSize={0.04} color="#808080" opacity={0.3} anchorX="center" anchorY="middle">1</Text>
-                <Text position={[-0.6, 0.02, 0.5]} rotation={[-Math.PI / 2, 0, 0]} fontSize={0.04} color="#808080" opacity={0.3} anchorX="center" anchorY="middle">-1</Text>
-                <Text position={[-0.6, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]} fontSize={0.04} color="#808080" opacity={0.3} anchorX="center" anchorY="middle">0</Text>
-                <Text position={[-0.6, 0.02, -0.5]} rotation={[-Math.PI / 2, 0, 0]} fontSize={0.04} color="#808080" opacity={0.3} anchorX="center" anchorY="middle">1</Text>
+                <Text position={[-0.5, 0.02, 0.6]} rotation={[-Math.PI / 2, 0, 0]} fontSize={0.04} color="#808080" anchorX="center" anchorY="middle">-1</Text>
+                <Text position={[0, 0.02, 0.6]} rotation={[-Math.PI / 2, 0, 0]} fontSize={0.04} color="#808080" anchorX="center" anchorY="middle">0</Text>
+                <Text position={[0.5, 0.02, 0.6]} rotation={[-Math.PI / 2, 0, 0]} fontSize={0.04} color="#808080" anchorX="center" anchorY="middle">1</Text>
+                <Text position={[-0.6, 0.02, 0.5]} rotation={[-Math.PI / 2, 0, 0]} fontSize={0.04} color="#808080" anchorX="center" anchorY="middle">-1</Text>
+                <Text position={[-0.6, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]} fontSize={0.04} color="#808080" anchorX="center" anchorY="middle">0</Text>
+                <Text position={[-0.6, 0.02, -0.5]} rotation={[-Math.PI / 2, 0, 0]} fontSize={0.04} color="#808080" anchorX="center" anchorY="middle">1</Text>
             </group>
 
             <axesHelper args={[1.2]} />
