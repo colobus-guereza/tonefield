@@ -5,8 +5,8 @@ import { Stars, Sparkles } from "@react-three/drei";
 import { useRef, useEffect, useMemo } from "react";
 import * as THREE from "three";
 
-// 나룻배 컴포넌트 (1인칭 시점용)
-function FerryBoat({ cameraRef, boatRef }: { cameraRef: React.RefObject<THREE.Group | null>; boatRef: React.RefObject<THREE.Group | null> }) {
+// 나룻배 컴포넌트 (1인칭 시점용) - 우주1로 이동
+export function FerryBoat({ cameraRef, boatRef }: { cameraRef?: React.RefObject<THREE.Group | null>; boatRef: React.RefObject<THREE.Group | null> }) {
     const oar1Ref = useRef<THREE.Group>(null);
     const oar2Ref = useRef<THREE.Group>(null);
     const angleRef = useRef(0);
@@ -30,67 +30,70 @@ function FerryBoat({ cameraRef, boatRef }: { cameraRef: React.RefObject<THREE.Gr
         return new THREE.LatheGeometry(hullPoints, 32, 0, Math.PI);
     }, []);
 
-    // 노 애니메이션
+    // 노 애니메이션 (달팽이처럼 느리게)
     useFrame((state) => {
         const time = state.clock.elapsedTime;
-        
-        // 노를 부드럽게 움직이는 애니메이션
+
+        // 노를 부드럽게 움직이는 애니메이션 (매우 느리게)
         if (oar1Ref.current) {
-            oar1Ref.current.rotation.z = Math.sin(time * 1.2) * 0.3 + Math.PI / 4;
+            oar1Ref.current.rotation.z = Math.sin(time * 0.2) * 0.3 + Math.PI / 4;
         }
         if (oar2Ref.current) {
-            oar2Ref.current.rotation.z = Math.sin(time * 1.2 + Math.PI) * 0.3 + Math.PI / 4;
+            oar2Ref.current.rotation.z = Math.sin(time * 0.2 + Math.PI) * 0.3 + Math.PI / 4;
         }
     });
 
     useFrame((state) => {
-        if (!boatRef.current || !cameraRef.current) return;
+        if (!boatRef.current) return;
+        if (cameraRef && !cameraRef.current) return;
 
         // 부드럽게 유영하는 애니메이션
         const time = state.clock.elapsedTime;
         const deltaTime = time - lastTimeRef.current;
         lastTimeRef.current = time;
 
-        // 속도 스펙트럼: 여러 주파수를 조합하여 넓은 속도 범위 생성
+        // 속도 스펙트럼: 여러 주파수를 조합하여 넓은 속도 범위 생성 (달팽이처럼 매우 느리고 부드럽게)
         const speedVariation =
-            Math.sin(time * 0.1) * 0.3 +
-            Math.sin(time * 0.3) * 0.2 +
-            Math.sin(time * 0.7) * 0.15 +
-            Math.sin(time * 1.5) * 0.1;
+            Math.sin(time * 0.02) * 0.003 +
+            Math.sin(time * 0.05) * 0.002 +
+            Math.sin(time * 0.1) * 0.0015 +
+            Math.sin(time * 0.2) * 0.001;
 
-        const baseSpeed = 0.425;
+        const baseSpeed = 0.005; // 달팽이처럼 매우 느린 기본 속도
         const speed = baseSpeed + speedVariation;
 
         // 각도를 속도에 따라 누적
         angleRef.current += speed * deltaTime;
         const angle = angleRef.current;
 
-        // 원형 경로로 이동 (더 넓은 범위)
-        const radius = 20;
+        // 원형 경로로 이동 (우주1에 맞게 조정)
+        const radius = 15; // 우주1에 맞게 조정
         boatRef.current.position.x = Math.cos(angle) * radius;
-        boatRef.current.position.y = Math.sin(angle * 0.5) * 5 + 8;
-        boatRef.current.position.z = Math.sin(angle) * radius;
+        boatRef.current.position.y = Math.sin(angle * 0.5) * 4 + 6; // 우주1에 맞게 조정
+        boatRef.current.position.z = Math.sin(angle) * radius - 10; // 우주1에 맞게 조정
 
         // 배가 이동 방향을 향하도록 회전
         boatRef.current.rotation.y = angle + Math.PI / 2;
 
-        // 살짝 흔들리는 효과
+        // 살짝 흔들리는 효과 (부드럽고 느리게)
         const shakeIntensity = Math.abs(speedVariation) * 0.3;
-        boatRef.current.rotation.z = Math.sin(time * 2) * (0.1 + shakeIntensity);
-        boatRef.current.rotation.x = Math.cos(time * 1.5) * (0.05 + shakeIntensity * 0.5);
+        boatRef.current.rotation.z = Math.sin(time * 0.3) * (0.1 + shakeIntensity);
+        boatRef.current.rotation.x = Math.cos(time * 0.2) * (0.05 + shakeIntensity * 0.5);
 
-        // 카메라를 나룻배에 부착 (1인칭 시점)
-        // 나룻배 중앙 좌석 위치에 카메라 위치 (고정)
-        const cameraOffset = new THREE.Vector3(0, 0.2, 0);
-        cameraOffset.applyQuaternion(boatRef.current.quaternion);
-        cameraRef.current.position.copy(boatRef.current.position).add(cameraOffset);
-        
-        // 카메라 회전은 나룻배의 기본 회전 + 마우스 룩어라운드 회전이 합쳐짐
-        // (FirstPersonCamera에서 처리)
+        // 카메라를 나룻배에 부착 (1인칭 시점) - cameraRef가 있을 때만
+        if (cameraRef && cameraRef.current) {
+            // 나룻배 중앙 좌석 위치에 카메라 위치 (고정)
+            const cameraOffset = new THREE.Vector3(0, 0.2, 0);
+            cameraOffset.applyQuaternion(boatRef.current.quaternion);
+            cameraRef.current.position.copy(boatRef.current.position).add(cameraOffset);
+
+            // 카메라 회전은 나룻배의 기본 회전 + 마우스 룩어라운드 회전이 합쳐짐
+            // (FirstPersonCamera에서 처리)
+        }
     });
 
     return (
-        <group ref={boatRef} position={[20, 8, 0]}>
+        <group ref={boatRef} position={[15, 6, -10]}> {/* 우주1에 맞게 초기 위치 조정 */}
             {/* 선체 (Hull) - LatheGeometry 사용 */}
             <mesh
                 geometry={hullGeometry}
@@ -148,7 +151,7 @@ function FerryBoat({ cameraRef, boatRef }: { cameraRef: React.RefObject<THREE.Gr
                 </mesh>
             </group>
 
-            {/* 돛대 (선택적 - 우주 나룻배 느낌 유지) */}
+            {/* 돛대 (선택적 - 우주2 나룻배 느낌 유지) */}
             <mesh position={[0, 0.5, 0]}>
                 <cylinderGeometry args={[0.02, 0.02, 1.2, 8]} />
                 <meshStandardMaterial
@@ -192,13 +195,13 @@ function FerryBoat({ cameraRef, boatRef }: { cameraRef: React.RefObject<THREE.Gr
     );
 }
 
-// 1인칭 카메라 컨트롤러
-function FirstPersonCamera({ 
-    cameraRef, 
-    boatRef 
-}: { 
-    cameraRef: React.RefObject<THREE.Group | null>; 
-    boatRef: React.RefObject<THREE.Group | null> 
+// 1인칭 카메라 컨트롤러 - 우주1에서 사용
+export function FirstPersonCamera({
+    cameraRef,
+    boatRef
+}: {
+    cameraRef: React.RefObject<THREE.Group | null>;
+    boatRef: React.RefObject<THREE.Group | null>
 }) {
     const { camera } = useThree();
     const lookEuler = useRef(new THREE.Euler(0, 0, 0, 'YXZ'));
@@ -211,13 +214,13 @@ function FirstPersonCamera({
 
         // 초기 룩어라운드 회전 설정
         lookEuler.current.set(0, 0, 0, 'YXZ');
-        
+
         // 포인터 락 요청
         const requestPointerLock = () => {
             const canvas = document.querySelector('canvas');
             if (canvas) {
-                canvas.requestPointerLock = canvas.requestPointerLock || 
-                    (canvas as any).mozRequestPointerLock || 
+                canvas.requestPointerLock = canvas.requestPointerLock ||
+                    (canvas as any).mozRequestPointerLock ||
                     (canvas as any).webkitRequestPointerLock;
                 canvas.requestPointerLock();
             }
@@ -246,7 +249,7 @@ function FirstPersonCamera({
             // movementX/Y가 undefined일 수 있으므로 안전하게 처리
             const movementX = event.movementX ?? (event as any).mozMovementX ?? (event as any).webkitMovementX ?? 0;
             const movementY = event.movementY ?? (event as any).mozMovementY ?? (event as any).webkitMovementY ?? 0;
-            
+
             const deltaX = movementX * sensitivity;
             const deltaY = movementY * sensitivity;
 
@@ -264,7 +267,7 @@ function FirstPersonCamera({
         const handleCanvasClick = () => {
             requestPointerLock();
         };
-        
+
         if (canvas) {
             canvas.addEventListener('click', handleCanvasClick);
         }
@@ -292,11 +295,11 @@ function FirstPersonCamera({
         if (cameraRef.current && boatRef.current && camera) {
             // 카메라 위치는 나룻배에 고정
             camera.position.copy(cameraRef.current.position);
-            
+
             // 카메라 회전 = 나룻배 회전 + 마우스 룩어라운드 회전
             const boatQuaternion = boatRef.current.quaternion.clone();
             const lookQuaternion = new THREE.Quaternion().setFromEuler(lookEuler.current);
-            
+
             // 나룻배의 회전에 룩어라운드 회전을 곱함 (나룻배 회전을 먼저 적용)
             camera.quaternion.copy(boatQuaternion.multiply(lookQuaternion));
         }
@@ -305,11 +308,11 @@ function FirstPersonCamera({
     return null;
 }
 
-// 태양 컴포넌트 (밝은 광원)
-function Sun({ position }: { position: [number, number, number] }) {
+// 태양 컴포넌트 (밝은 광원) - 우주1로 이동
+export function Sun({ position }: { position: [number, number, number] }) {
     const sunRef = useRef<THREE.Mesh>(null);
     const glowRef = useRef<THREE.Mesh>(null);
-    
+
     // 태양 회전 애니메이션
     useFrame(() => {
         if (sunRef.current) {
@@ -332,7 +335,7 @@ function Sun({ position }: { position: [number, number, number] }) {
                     side={THREE.BackSide}
                 />
             </mesh>
-            
+
             {/* 태양 본체 */}
             <mesh ref={sunRef}>
                 <sphereGeometry args={[6, 32, 32]} />
@@ -342,7 +345,7 @@ function Sun({ position }: { position: [number, number, number] }) {
                     emissiveIntensity={2}
                 />
             </mesh>
-            
+
             {/* 태양 코로나 효과 (입자) */}
             <Sparkles
                 count={200}
@@ -353,7 +356,7 @@ function Sun({ position }: { position: [number, number, number] }) {
                 color="#ffaa00"
                 position={[0, 0, 0]}
             />
-            
+
             {/* 태양에서 나오는 강한 조명 (주 광원) */}
             <pointLight
                 position={[0, 0, 0]}
@@ -362,7 +365,7 @@ function Sun({ position }: { position: [number, number, number] }) {
                 distance={500}
                 decay={1}
             />
-            
+
             {/* 태양에서 나오는 방향성 조명 (더 넓은 범위) */}
             <directionalLight
                 position={[0, 0, 0]}
@@ -406,13 +409,13 @@ export function FerryBoatScene({ onExit }: { onExit: () => void }) {
         // html과 body 모두에 스크롤바 숨기기 및 스크롤 방지
         const html = document.documentElement;
         const body = document.body;
-        
+
         const originalHtmlOverflow = html.style.overflow;
         const originalHtmlHeight = html.style.height;
         const originalBodyOverflow = body.style.overflow;
         const originalBodyHeight = body.style.height;
         const originalBodyPosition = body.style.position;
-        
+
         // html과 body 모두에 스크롤 방지 적용
         html.style.overflow = 'hidden';
         html.style.height = '100%';
@@ -430,7 +433,7 @@ export function FerryBoatScene({ onExit }: { onExit: () => void }) {
             document.removeEventListener('wheel', handleWheel);
             document.removeEventListener('touchmove', handleTouchMove);
             document.removeEventListener('keydown', handleKeyDown);
-            
+
             // 원래 스타일 복원
             html.style.overflow = originalHtmlOverflow;
             html.style.height = originalHtmlHeight;
@@ -442,9 +445,9 @@ export function FerryBoatScene({ onExit }: { onExit: () => void }) {
     }, [onExit]);
 
     return (
-        <div 
-            className="w-full h-full relative bg-black" 
-            style={{ 
+        <div
+            className="w-full h-full relative bg-black"
+            style={{
                 overflow: 'hidden',
                 position: 'fixed',
                 top: 0,
@@ -462,7 +465,7 @@ export function FerryBoatScene({ onExit }: { onExit: () => void }) {
                     onExit();
                 }}
                 className="absolute top-6 right-6 z-50 w-10 h-10 rounded-full bg-white/5 backdrop-blur-md border border-white/10 text-white/80 hover:bg-white/10 hover:text-white transition-all flex items-center justify-center"
-                title="나가기 (우주차원 레벨 1로 복귀)"
+                title="나가기 (우주1로 복귀)"
             >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M4 4h8v16H4V4z" />
@@ -490,32 +493,32 @@ export function FerryBoatScene({ onExit }: { onExit: () => void }) {
             {/* UI Overlay */}
             <div className="absolute top-8 left-8 text-white/50 pointer-events-none">
                 <h1 className="text-2xl font-light tracking-[0.2em] mb-1 text-white/80">Ferry Boat Journey</h1>
-                <p className="text-xs font-mono tracking-widest">우주를 유영하는 나룻배</p>
+                <p className="text-xs font-mono tracking-widest">우주2를 유영하는 나룻배</p>
             </div>
 
-            <Canvas 
-                dpr={[1, 2]} 
+            <Canvas
+                dpr={[1, 2]}
                 camera={{ position: [0, 0, 0], fov: 75 }}
                 style={{ cursor: 'none' }}
             >
-                {/* 우주 배경색 */}
+                {/* 우주2 배경색 */}
                 <color attach="background" args={['#000011']} />
 
-                {/* 우주 별들 */}
-                <Stars 
-                    radius={200} 
-                    depth={100} 
-                    count={10000} 
-                    factor={4} 
-                    saturation={0.5} 
-                    fade 
+                {/* 우주2 별들 */}
+                <Stars
+                    radius={200}
+                    depth={100}
+                    count={10000}
+                    factor={4}
+                    saturation={0.5}
+                    fade
                     speed={0.3}
                 />
 
-                {/* 밝은 태양 (주 광원) - 우주 멀리 떨어진 곳에 배치 */}
+                {/* 밝은 태양 (주 광원) - 우주2 멀리 떨어진 곳에 배치 */}
                 <Sun position={[0, 50, -100]} />
 
-                {/* 우주 환경 조명 (태양 광원 보조) */}
+                {/* 우주2 환경 조명 (태양 광원 보조) */}
                 <ambientLight intensity={0.6} color="#ffeedd" />
                 <pointLight position={[50, 50, 50]} intensity={0.5} color="#ffdd00" />
                 <pointLight position={[-50, 30, -50]} intensity={0.4} color="#ffaa00" />

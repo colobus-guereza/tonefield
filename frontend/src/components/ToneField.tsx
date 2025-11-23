@@ -7,10 +7,11 @@ import * as THREE from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import { supabase } from "@/lib/supabase";
 import Spaceship from "@/components/metaverse/objects/Spaceship";
-import SpacePterosaur from "@/components/metaverse/objects/SpacePterosaur";
+
 import { Player } from "@/components/metaverse/objects/Player";
 import { SndStoreScene } from "@/components/metaverse/scenes/SndStoreScene";
 import { FerryBoatScene } from "@/components/metaverse/scenes/FerryBoatScene";
+import { FerryBoat, Sun, FirstPersonCamera } from "@/components/metaverse/scenes/FerryBoatScene";
 
 // 카메라 프리셋 타입 정의
 type CameraPreset = 'top' | 'perspective' | 'front' | 'side' | 'isometric' | 'close';
@@ -1156,128 +1157,6 @@ function CameraController({ viewMode }: { viewMode: CameraPreset }) {
     return null;
 }
 
-// Space Boat Component - 우주에 유영하는 나룻배
-function SpaceBoat({ boatRef }: { boatRef?: React.RefObject<THREE.Group | null> }) {
-    const internalBoatRef = useRef<THREE.Group>(null);
-    const boatRefToUse = boatRef || internalBoatRef;
-    const angleRef = useRef(0);
-    const lastTimeRef = useRef(0);
-
-    useFrame((state) => {
-        if (!boatRefToUse.current) return;
-
-        // 부드럽게 유영하는 애니메이션
-        const time = state.clock.elapsedTime;
-        const deltaTime = time - lastTimeRef.current;
-        lastTimeRef.current = time;
-
-        // 속도 스펙트럼: 여러 주파수를 조합하여 넓은 속도 범위 생성
-        // 최소 속도: 0.05, 최대 속도: 0.8
-        const speedVariation =
-            Math.sin(time * 0.1) * 0.3 +           // 느린 변화 (장기)
-            Math.sin(time * 0.3) * 0.2 +           // 중간 변화
-            Math.sin(time * 0.7) * 0.15 +          // 빠른 변화 (단기)
-            Math.sin(time * 1.5) * 0.1;            // 매우 빠른 변화
-
-        // 속도를 0.05 ~ 0.8 범위로 정규화
-        const baseSpeed = 0.425; // 중간값
-        const speed = baseSpeed + speedVariation;
-
-        // 각도를 속도에 따라 누적 (적분)
-        angleRef.current += speed * deltaTime;
-        const angle = angleRef.current;
-
-        // 원형 경로로 이동
-        const radius = 12;
-        boatRefToUse.current.position.x = Math.cos(angle) * radius;
-        boatRefToUse.current.position.y = Math.sin(angle * 0.5) * 3 + 4;
-        boatRefToUse.current.position.z = Math.sin(angle) * radius - 15;
-
-        // 배가 이동 방향을 향하도록 회전 (속도에 따라)
-        boatRefToUse.current.rotation.y = angle + Math.PI / 2;
-
-        // 살짝 흔들리는 효과 (속도가 빠를수록 더 많이 흔들림)
-        const shakeIntensity = Math.abs(speedVariation) * 0.3;
-        boatRefToUse.current.rotation.z = Math.sin(time * 2) * (0.1 + shakeIntensity);
-        boatRefToUse.current.rotation.x = Math.cos(time * 1.5) * (0.05 + shakeIntensity * 0.5);
-    });
-
-    return (
-        <group ref={boatRefToUse} position={[12, 4, -15]}>
-            {/* 배의 몸체 */}
-            <mesh position={[0, 0, 0]}>
-                <boxGeometry args={[0.8, 0.3, 2]} />
-                <meshStandardMaterial
-                    color="#8B4513"
-                    metalness={0.3}
-                    roughness={0.7}
-                />
-            </mesh>
-
-            {/* 배의 앞부분 (뾰족한 부분) */}
-            <mesh position={[0, 0.1, 1.1]} rotation={[0, 0, 0]}>
-                <coneGeometry args={[0.15, 0.4, 8]} />
-                <meshStandardMaterial
-                    color="#654321"
-                    metalness={0.3}
-                    roughness={0.7}
-                />
-            </mesh>
-
-            {/* 돛대 */}
-            <mesh position={[0, 0.5, 0]}>
-                <cylinderGeometry args={[0.02, 0.02, 1.2, 8]} />
-                <meshStandardMaterial
-                    color="#654321"
-                    metalness={0.5}
-                    roughness={0.5}
-                />
-            </mesh>
-
-            {/* 메인 돛 */}
-            <mesh position={[0, 0.8, -0.2]} rotation={[0, 0, 0.1]}>
-                <planeGeometry args={[0.6, 0.8]} />
-                <meshStandardMaterial
-                    color="#F5F5DC"
-                    transparent
-                    opacity={0.9}
-                    side={THREE.DoubleSide}
-                />
-            </mesh>
-
-            {/* 작은 돛 (앞쪽) */}
-            <mesh position={[0, 0.6, 0.6]} rotation={[0, 0, -0.15]}>
-                <planeGeometry args={[0.4, 0.5]} />
-                <meshStandardMaterial
-                    color="#FFFACD"
-                    transparent
-                    opacity={0.85}
-                    side={THREE.DoubleSide}
-                />
-            </mesh>
-
-            {/* 배의 바닥 (강화) */}
-            <mesh position={[0, -0.15, 0]}>
-                <boxGeometry args={[0.9, 0.1, 2.1]} />
-                <meshStandardMaterial
-                    color="#654321"
-                    metalness={0.4}
-                    roughness={0.6}
-                />
-            </mesh>
-
-            {/* 깃발 */}
-            <mesh position={[0, 1.2, 0]} rotation={[0, 0, 0]}>
-                <planeGeometry args={[0.3, 0.4]} />
-                <meshStandardMaterial
-                    color="#FF0000"
-                    side={THREE.DoubleSide}
-                />
-            </mesh>
-        </group>
-    );
-}
-
 // 나룻배 탑승 모드 카메라 컨트롤러
 function FerryBoatCameraController({ boatRef }: { boatRef: React.RefObject<THREE.Group | null> }) {
     const { camera } = useThree();
@@ -1290,7 +1169,7 @@ function FerryBoatCameraController({ boatRef }: { boatRef: React.RefObject<THREE
         const cameraOffset = new THREE.Vector3(0, 0.3, -0.5); // z를 음수로 변경하여 앞쪽에 배치
         cameraOffset.applyQuaternion(boatRef.current.quaternion);
         camera.position.copy(boatRef.current.position).add(cameraOffset);
-        
+
         // 카메라가 나룻배가 바라보는 방향(운전 방향)을 보도록 회전
         // 나룻배의 회전을 그대로 사용하되, 약간의 수평 조정
         camera.rotation.copy(boatRef.current.rotation);
@@ -1577,8 +1456,8 @@ function AncientPavilionPlanet({ position }: { position: [number, number, number
     );
 }
 
-// Space Background Component - 우주 배경 (별, 먼지, 행성, 블랙홀)
-function SpaceBackground({ boatRef }: { boatRef?: React.RefObject<THREE.Group | null> }) {
+// Space Background Component - 우주1 배경 (별, 먼지, 행성, 블랙홀)
+function SpaceBackground() {
     const starsRef = useRef<THREE.Points>(null);
     const dustRef = useRef<THREE.Points>(null);
 
@@ -1676,7 +1555,7 @@ function SpaceBackground({ boatRef }: { boatRef?: React.RefObject<THREE.Group | 
                 />
             </points>
 
-            {/* 우주 먼지 */}
+            {/* 우주1 먼지 */}
             <points ref={dustRef} geometry={dustGeometry}>
                 <pointsMaterial
                     size={0.01}
@@ -1755,9 +1634,6 @@ function SpaceBackground({ boatRef }: { boatRef?: React.RefObject<THREE.Group | 
                     />
                 </mesh>
             </group>
-
-            {/* 우주에 유영하는 나룻배 */}
-            <SpaceBoat boatRef={boatRef} />
 
             {/* 혜성들 (성능 최적화: 5 -> 3으로 감소) */}
             {[0, 1, 2].map((i) => (
@@ -1864,7 +1740,7 @@ function Comet({ index }: { index: number }) {
     );
 }
 
-// 우주 연기 컴포넌트
+// 우주1 연기 컴포넌트
 function SpaceSmoke({ index }: { index: number }) {
     const smokeRef = useRef<THREE.Group>(null);
 
@@ -1988,14 +1864,15 @@ export function ToneField() {
 
     const [cameraView, setCameraView] = useState<CameraPreset>('top'); // Changed to 'top'
     const [isUIVisible, setIsUIVisible] = useState(true); // UI 표시/숨김 상태
-    const [showSpace, setShowSpace] = useState(false); // 우주 표시 상태 (숨기기 모드에서 새로운 세계 버튼으로 활성화)
+    const [showSpace, setShowSpace] = useState(false); // 우주1 표시 상태 (숨기기 모드에서 새로운 세계 버튼으로 활성화)
     const [inMetaverse, setInMetaverse] = useState(false); // 매장 차원 표시 상태
     const [inSpaceGameMode, setInSpaceGameMode] = useState(false); // 우주선 탑승 게임 모드 상태
     const [spaceshipPosition, setSpaceshipPosition] = useState<[number, number, number]>([0, 0, 0]); // 우주선 위치 상태
     const [spaceshipRotation, setSpaceshipRotation] = useState<[number, number, number]>([0, 0, 0]); // 우주선 회전 상태
     const [spaceshipVelocity, setSpaceshipVelocity] = useState<number>(0); // 우주선 속도 상태
     const [inFerryBoatMode, setInFerryBoatMode] = useState(false); // 나룻배 탑승 모드 상태
-    const ferryBoatRef = useRef<THREE.Group>(null); // 나룻배 ref
+    const ferryBoatRef = useRef<THREE.Group>(null); // 나룻배 ref (우주1의 FerryBoat)
+    const ferryBoatCameraRef = useRef<THREE.Group>(null); // 나룻배 카메라 ref (1인칭 시점용)
     const [isFullscreen, setIsFullscreen] = useState(false); // 전체화면 상태
     const containerRef = useRef<HTMLDivElement>(null); // 전체화면을 위한 ref
     const orbitControlsRef = useRef<OrbitControlsImpl>(null); // OrbitControls ref
@@ -2419,9 +2296,9 @@ export function ToneField() {
         setHitPointCount("");
         setHammeringType("");
 
-        // Camera view - 초기값으로 리셋
-        setCameraView('top');
-        
+        // Camera view - 6번째 시점(close)으로 리셋
+        setCameraView('close');
+
         // OrbitControls 리셋 (카메라 시점 초기화)
         if (orbitControlsRef.current) {
             orbitControlsRef.current.reset();
@@ -2789,15 +2666,7 @@ export function ToneField() {
         />;
     }
 
-    // 나룻배 모드 진입 시 FerryBoatScene 렌더링
-    if (inFerryBoatMode) {
-        return <FerryBoatScene
-            onExit={() => {
-                setInFerryBoatMode(false);
-                setIsUIVisible(false);
-            }}
-        />;
-    }
+    // 나룻배 모드는 이제 우주1에서 FerryBoat 시점으로 전환 (별도 씬으로 이동하지 않음)
 
     return (
         <div ref={containerRef} className="w-full h-screen relative" style={{ backgroundColor: '#000000' }}>
@@ -3140,34 +3009,43 @@ export function ToneField() {
                     {/* 게임 모드 및 나룻배 모드일 때는 OrbitControls 비활성화 */}
                     {!inSpaceGameMode && !inFerryBoatMode && <OrbitControls ref={orbitControlsRef} target={[0, 0, 0]} />}
                     {!inSpaceGameMode && !inFerryBoatMode && <CameraController viewMode={cameraView} />}
-                    {/* 나룻배 탑승 모드 카메라 컨트롤러 */}
-                    {inFerryBoatMode && <FerryBoatCameraController boatRef={ferryBoatRef} />}
+                    {/* 나룻배 탑승 모드 카메라 컨트롤러 - 우주1의 FerryBoat 1인칭 시점 */}
+                    {inFerryBoatMode && (
+                        <>
+                            {/* 카메라 그룹 (나룻배에 부착될 카메라) */}
+                            <group ref={ferryBoatCameraRef} />
+                            <FirstPersonCamera cameraRef={ferryBoatCameraRef} boatRef={ferryBoatRef} />
+                        </>
+                    )}
 
                     <ambientLight intensity={0.4} />
                     <pointLight position={[10, 10, 10]} intensity={1} />
                     <pointLight position={[-10, 5, -10]} intensity={0.5} color="#ff00ff" />
 
                     {/* Space Background - 숨기기 모드에서 새로운 세계 버튼을 눌렀을 때만 표시 */}
-                    {!isUIVisible && showSpace && <SpaceBackground boatRef={ferryBoatRef} />}
-                    
-                    {/* 우주선 - 우주 차원에서 톤필드 위에 착륙 (0,0,0 지점에 고정) */}
+                    {!isUIVisible && showSpace && <SpaceBackground />}
+
+                    {/* 우주1에 이동한 FerryBoat (우주2에서 이동) - 우주1에서만 표시 */}
                     {!isUIVisible && showSpace && (
-                        <Spaceship 
-                            position={inSpaceGameMode ? spaceshipPosition : [0, 0, 0]} 
+                        <FerryBoat cameraRef={ferryBoatCameraRef} boatRef={ferryBoatRef} />
+                    )}
+
+                    {/* 우주1에 이동한 태양 (우주2에서 이동) - 우주1에서만 표시 */}
+                    {!isUIVisible && showSpace && (
+                        <Sun position={[0, 50, -100]} />
+                    )}
+
+                    {/* 우주선 - 우주1에서 톤필드 위에 착륙 (0,0,0 지점에 고정) */}
+                    {!isUIVisible && showSpace && (
+                        <Spaceship
+                            position={inSpaceGameMode ? spaceshipPosition : [0, 0, 0]}
                             rotation={inSpaceGameMode ? spaceshipRotation : undefined}
                             velocity={inSpaceGameMode ? spaceshipVelocity : 0}
                         />
                     )}
-                    
-                    {/* 우주 익룡 - 우주선과 독립적으로 움직임 (고정된 초기 위치) */}
-                    {!isUIVisible && showSpace && (
-                        <SpacePterosaur 
-                            position={[0.15, 0, -0.05]} 
-                            scale={2.5} 
-                            speed={0.6} 
-                        />
-                    )}
-                    
+
+
+
                     {/* 탑승 버튼 - 우주선 바로 위에 표시 (0,0,0 지점에 고정) */}
                     {!isUIVisible && showSpace && !inSpaceGameMode && !inFerryBoatMode && (
                         <Html position={[0, 0.06, 0]} center>
@@ -3179,7 +3057,7 @@ export function ToneField() {
                                     setSpaceshipRotation([0, 0, 0]); // 우주선 회전 초기화
                                 }}
                                 className="cyberpunk-button"
-                                style={{ 
+                                style={{
                                     pointerEvents: 'auto',
                                     whiteSpace: 'nowrap'
                                 }}
@@ -3188,10 +3066,10 @@ export function ToneField() {
                             </button>
                         </Html>
                     )}
-                    
+
                     {/* 우주선 게임 모드 - Player 컴포넌트 활성화 (나룻배 모드일 때는 비활성화) */}
                     {!isUIVisible && showSpace && inSpaceGameMode && !inFerryBoatMode && (
-                        <Player 
+                        <Player
                             initialPosition={[0, 0, 0]}
                             onPositionChange={(position) => setSpaceshipPosition(position)}
                             onRotationChange={(rotation) => setSpaceshipRotation(rotation)}
@@ -3319,18 +3197,17 @@ export function ToneField() {
                 {/* UI Toggle Button - 우측 상단, UI 숨김 모드일 때만 표시 */}
                 {!isUIVisible && (
                     <>
-                        {/* 레벨 2 (우주 차원)일 때는 나가기 버튼만 표시 */}
+                        {/* 레벨 2 (우주1)일 때는 나가기 버튼만 표시 */}
                         {showSpace ? (
                             <>
-                                {/* 나룻배 탑승 버튼 - 깃발 모양 (board 버튼 왼쪽) */}
-                                {!inSpaceGameMode && !inFerryBoatMode && (
+                                {/* 나룻배 탑승 버튼 - 깃발 모양 (board 버튼 왼쪽) - 우주1에서만 표시 */}
+                                {!inSpaceGameMode && !inFerryBoatMode && !isUIVisible && showSpace && (
                                     <button
                                         onClick={() => {
                                             setInFerryBoatMode(true);
-                                            setIsUIVisible(false);
                                         }}
                                         className="absolute top-6 right-20 w-10 h-10 rounded-full bg-black/80 backdrop-blur-md border border-white/30 text-white/70 flex items-center justify-center hover:bg-black/90 hover:border-white/50 hover:text-white transition-all shadow-lg opacity-70 hover:opacity-100 z-[100]"
-                                        title="나룻배 탑승 (ESC로 종료)"
+                                        title="나룻배 탑승 (우주1의 FerryBoat 시점, ESC로 종료)"
                                     >
                                         {/* 깃발 아이콘 */}
                                         <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -3351,7 +3228,7 @@ export function ToneField() {
                                                 setInSpaceGameMode(false);
                                                 setIsUIVisible(false);
                                             } else {
-                                                // 우주 차원에서 나가기 - 숨기기 모드 레벨 1로 이동
+                                                // 우주1에서 나가기 - 숨기기 모드 레벨 1로 이동
                                                 setShowSpace(false);
                                                 setIsUIVisible(false);
                                             }
@@ -3375,7 +3252,7 @@ export function ToneField() {
                                 <button
                                     onClick={() => {
                                         setIsUIVisible(true);
-                                        setShowSpace(false); // 다시보기 시 우주도 숨김
+                                        setShowSpace(false); // 다시보기 시 우주1도 숨김
                                     }}
                                     className="absolute top-6 right-6 w-10 h-10 rounded-full bg-black/80 backdrop-blur-md border border-white/10 text-white flex items-center justify-center hover:bg-black/90 transition-colors shadow-lg opacity-70 hover:opacity-100 z-[100]"
                                     title="UI 보기"
@@ -3386,15 +3263,15 @@ export function ToneField() {
                                     </svg>
                                 </button>
 
-                                {/* 기준점 좌측: 우주, 매장 아이콘 (가로 배치) */}
+                                {/* 기준점 좌측: 우주1, 매장 아이콘 (가로 배치) */}
                                 <div className="absolute top-6 right-20 flex items-center gap-3 z-[100]">
-                                    {/* Universe Dimension Button */}
+                                    {/* 우주1 버튼 */}
                                     <button
                                         onClick={() => {
-                                            setShowSpace(true); // 우주 차원 열기
+                                            setShowSpace(true); // 우주1 열기
                                         }}
                                         className="w-10 h-10 rounded-full bg-black/80 backdrop-blur-md border border-blue-500/30 text-blue-400/70 flex items-center justify-center hover:bg-black/90 hover:border-blue-400/50 hover:text-blue-300 transition-all shadow-lg opacity-70 hover:opacity-100"
-                                        title="우주 차원 열기"
+                                        title="우주1 열기"
                                     >
                                         <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -3467,8 +3344,8 @@ export function ToneField() {
                                     }}
                                     disabled={!hitPointCoordinate} // 좌표가 없으면 비활성화
                                     className={`absolute top-32 right-6 w-10 h-10 rounded-full bg-black/80 backdrop-blur-md border flex items-center justify-center transition-all shadow-lg z-[100] ${hitPointCoordinate
-                                            ? 'border-orange-500/30 text-orange-400 hover:bg-black/90 hover:border-orange-400/50 hover:text-orange-300 opacity-70 hover:opacity-100'
-                                            : 'border-gray-500/30 text-gray-500/50 cursor-not-allowed opacity-30'
+                                        ? 'border-orange-500/30 text-orange-400 hover:bg-black/90 hover:border-orange-400/50 hover:text-orange-300 opacity-70 hover:opacity-100'
+                                        : 'border-gray-500/30 text-gray-500/50 cursor-not-allowed opacity-30'
                                         }`}
                                     title={hitPointCoordinate ? "좌표 마크 숨기기" : "표시된 좌표 없음"}
                                 >
@@ -3666,7 +3543,7 @@ export function ToneField() {
                     <button
                         onClick={() => {
                             setIsUIVisible(false);
-                            setShowSpace(false); // 숨기기 모드 진입 시 우주는 숨김
+                            setShowSpace(false); // 숨기기 모드 진입 시 우주1은 숨김
                         }}
                         className="p-2 rounded-full text-gray-300 hover:text-white hover:bg-white/10 transition-all relative group"
                         title="UI 숨기기"
