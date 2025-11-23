@@ -476,11 +476,6 @@ export function FerryBoatScene({ onExit }: { onExit: () => void }) {
             <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 z-40 pointer-events-none">
                 <div className="bg-black/50 backdrop-blur-sm px-6 py-3 rounded-full border border-white/10 text-white/70 text-sm flex items-center gap-4 shadow-lg">
                     <span className="flex flex-col items-center gap-1">
-                        <span className="px-1.5 py-0.5 bg-white/10 rounded text-xs font-mono border border-white/20">CLICK</span>
-                        <span>Lock Cursor</span>
-                    </span>
-                    <span className="w-px h-6 bg-white/20"></span>
-                    <span className="flex flex-col items-center gap-1">
                         <span className="px-1.5 py-0.5 bg-white/10 rounded text-xs font-mono border border-white/20">MOUSE</span>
                         <span>Look Around</span>
                     </span>
