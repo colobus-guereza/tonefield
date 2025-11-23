@@ -4,6 +4,7 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, PerspectiveCamera, Text, Html } from "@react-three/drei";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
+import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import { supabase } from "@/lib/supabase";
 import Spaceship from "@/components/metaverse/objects/Spaceship";
 import SpacePterosaur from "@/components/metaverse/objects/SpacePterosaur";
@@ -1156,7 +1157,7 @@ function CameraController({ viewMode }: { viewMode: CameraPreset }) {
 }
 
 // Space Boat Component - 우주에 유영하는 나룻배
-function SpaceBoat({ boatRef }: { boatRef?: React.RefObject<THREE.Group> }) {
+function SpaceBoat({ boatRef }: { boatRef?: React.RefObject<THREE.Group | null> }) {
     const internalBoatRef = useRef<THREE.Group>(null);
     const boatRefToUse = boatRef || internalBoatRef;
     const angleRef = useRef(0);
@@ -1278,7 +1279,7 @@ function SpaceBoat({ boatRef }: { boatRef?: React.RefObject<THREE.Group> }) {
 }
 
 // 나룻배 탑승 모드 카메라 컨트롤러
-function FerryBoatCameraController({ boatRef }: { boatRef: React.RefObject<THREE.Group> }) {
+function FerryBoatCameraController({ boatRef }: { boatRef: React.RefObject<THREE.Group | null> }) {
     const { camera } = useThree();
 
     useFrame(() => {
@@ -1577,7 +1578,7 @@ function AncientPavilionPlanet({ position }: { position: [number, number, number
 }
 
 // Space Background Component - 우주 배경 (별, 먼지, 행성, 블랙홀)
-function SpaceBackground({ boatRef }: { boatRef?: React.RefObject<THREE.Group> }) {
+function SpaceBackground({ boatRef }: { boatRef?: React.RefObject<THREE.Group | null> }) {
     const starsRef = useRef<THREE.Points>(null);
     const dustRef = useRef<THREE.Points>(null);
 
@@ -1997,7 +1998,7 @@ export function ToneField() {
     const ferryBoatRef = useRef<THREE.Group>(null); // 나룻배 ref
     const [isFullscreen, setIsFullscreen] = useState(false); // 전체화면 상태
     const containerRef = useRef<HTMLDivElement>(null); // 전체화면을 위한 ref
-    const orbitControlsRef = useRef<{ reset: () => void } | null>(null); // OrbitControls ref
+    const orbitControlsRef = useRef<OrbitControlsImpl>(null); // OrbitControls ref
 
     // Mesh ref for double click detection
     const toneFieldMeshRef = useRef<THREE.Mesh>(null);

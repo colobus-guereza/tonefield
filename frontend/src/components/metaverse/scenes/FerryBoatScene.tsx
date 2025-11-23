@@ -6,7 +6,7 @@ import { useRef, useEffect, useMemo } from "react";
 import * as THREE from "three";
 
 // 나룻배 컴포넌트 (1인칭 시점용)
-function FerryBoat({ cameraRef, boatRef }: { cameraRef: React.RefObject<THREE.Group>; boatRef: React.RefObject<THREE.Group> }) {
+function FerryBoat({ cameraRef, boatRef }: { cameraRef: React.RefObject<THREE.Group | null>; boatRef: React.RefObject<THREE.Group | null> }) {
     const oar1Ref = useRef<THREE.Group>(null);
     const oar2Ref = useRef<THREE.Group>(null);
     const angleRef = useRef(0);
@@ -197,8 +197,8 @@ function FirstPersonCamera({
     cameraRef, 
     boatRef 
 }: { 
-    cameraRef: React.RefObject<THREE.Group>; 
-    boatRef: React.RefObject<THREE.Group> 
+    cameraRef: React.RefObject<THREE.Group | null>; 
+    boatRef: React.RefObject<THREE.Group | null> 
 }) {
     const { camera } = useThree();
     const lookEuler = useRef(new THREE.Euler(0, 0, 0, 'YXZ'));
@@ -336,7 +336,7 @@ function Sun({ position }: { position: [number, number, number] }) {
             {/* 태양 본체 */}
             <mesh ref={sunRef}>
                 <sphereGeometry args={[6, 32, 32]} />
-                <meshBasicMaterial
+                <meshStandardMaterial
                     color="#ffdd00"
                     emissive="#ffaa00"
                     emissiveIntensity={2}
@@ -397,6 +397,12 @@ export function FerryBoatScene({ onExit }: { onExit: () => void }) {
             event.stopPropagation();
         };
 
+        // 터치 스크롤 방지
+        const handleTouchMove = (event: TouchEvent) => {
+            event.preventDefault();
+            event.stopPropagation();
+        };
+
         // html과 body 모두에 스크롤바 숨기기 및 스크롤 방지
         const html = document.documentElement;
         const body = document.body;
@@ -417,12 +423,12 @@ export function FerryBoatScene({ onExit }: { onExit: () => void }) {
 
         // 스크롤 방지 즉시 적용
         document.addEventListener('wheel', handleWheel, { passive: false });
-        document.addEventListener('touchmove', handleWheel, { passive: false });
+        document.addEventListener('touchmove', handleTouchMove, { passive: false });
         document.addEventListener('keydown', handleKeyDown);
 
         return () => {
             document.removeEventListener('wheel', handleWheel);
-            document.removeEventListener('touchmove', handleWheel);
+            document.removeEventListener('touchmove', handleTouchMove);
             document.removeEventListener('keydown', handleKeyDown);
             
             // 원래 스타일 복원
