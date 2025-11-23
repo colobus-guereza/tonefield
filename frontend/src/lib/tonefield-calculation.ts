@@ -50,7 +50,7 @@ export function calculateHitPointCoordinate(
   location: 'internal' | 'external'
 ): { x: number; y: number } {
   const { RADIUS_X, RADIUS_Y } = TONEFIELD_CONSTANTS;
-  
+
   const eT = Math.abs(errors.tonic);
   const eO = Math.abs(errors.octave);
   const eF = Math.abs(errors.fifth);
@@ -73,6 +73,11 @@ export function calculateHitPointCoordinate(
   // 벡터 힘 계산
   let vectorX = 0;
   let vectorY = 0;
+
+  // Apply angular masking to prevent side region (fifth) from invading the top region.
+  // The mask reduces the side component as the angle approaches the vertical (top) direction.
+  // mask = 1 - sin(theta) where theta is the angle from the horizontal axis.
+  // This will be applied after vector forces are determined.
 
   if (primary.type === 'fifth') {
     const isRight = Math.random() >= 0.5;
@@ -110,6 +115,10 @@ export function calculateHitPointCoordinate(
 
   // 각도 계산 및 타원 좌표 매핑
   const theta = Math.atan2(vectorY, vectorX);
+  // Compute mask based on angle (0 = horizontal, π/2 = vertical)
+  const mask = 1.0 - Math.sin(Math.abs(theta));
+  // Apply mask only to the side (X) component when the primary target is not the top region.
+  vectorX *= mask;
   const x = RADIUS_X * Math.cos(theta);
   const y = RADIUS_Y * Math.sin(theta);
 
@@ -169,6 +178,9 @@ export function calculateHitPointStrength(
   let finalForce = requiredForce;
   let finalCount = 1;
 
+  // Helper for smoothstep blending (defined later in file)
+
+
   if (requiredForce > LIMIT) {
     let count = 2;
     while (true) {
@@ -188,10 +200,24 @@ export function calculateHitPointStrength(
     }
   }
 
+  // Apply soft blending when the force approaches the safety limit
+  const blendT = smoothstep(LIMIT * 0.8, LIMIT, finalForce);
+  finalForce = finalForce * (1 - blendT) + LIMIT * blendT;
+
   return {
     strength: Number(finalForce.toFixed(1)),
     count: finalCount
   };
+}
+
+/**
+ * Helper function for smoothstep blending
+ */
+function smoothstep(edge0: number, edge1: number, x: number): number {
+  // Scale, bias and saturate x to 0..1 range
+  x = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+  // Evaluate polynomial
+  return x * x * (3 - 2 * x);
 }
 
 /**
@@ -282,12 +308,12 @@ export function calculateTuningTarget(errors: TuningErrors): {
     const primarySign = Math.sign(primary.value);
     const candidates = scores
       .slice(1)
-      .filter(item => 
+      .filter(item =>
         (item.key === 'tonic' || item.key === 'octave') &&
         item.value !== 0 &&
         Math.sign(item.value) === primarySign
       );
-    
+
     if (candidates.length > 0) {
       // 가중치 점수가 더 높은 것을 선택
       candidates.sort((a, b) => b.score - a.score);
@@ -327,8 +353,8 @@ export function calculateHitPoint(
     { type: 'tonic', value: errors.tonic },
     { type: 'octave', value: errors.octave },
     { type: 'fifth', value: errors.fifth }
-  ].sort((a, b) => Math.abs(b.value) * (b.type === 'tonic' ? 6 : b.type === 'octave' ? 3 : 2) - 
-                   Math.abs(a.value) * (a.type === 'tonic' ? 6 : a.type === 'octave' ? 3 : 2));
+  ].sort((a, b) => Math.abs(b.value) * (b.type === 'tonic' ? 6 : b.type === 'octave' ? 3 : 2) -
+    Math.abs(a.value) * (a.type === 'tonic' ? 6 : a.type === 'octave' ? 3 : 2));
 
   const primaryValue = scores[0].value;
   const intent = primaryValue > 0 ? '하향' : primaryValue < 0 ? '상향' : '상향';

@@ -99,59 +99,44 @@ function getErrorColor(errorValue: number): { color: THREE.Color, brightness: nu
     const color = new THREE.Color();
 
     // Base Colors
-    const safeColor = new THREE.Color(0, 1, 0); // Green
-    const errorBaseColor = (errorValue > 0)
-        ? new THREE.Color(1, 0, 0) // Red (+)
-        : new THREE.Color(0, 0, 1); // Blue (-)
+    const safeColor = new THREE.Color(0, 1, 0); // Green for perfect zone
+    const isPositive = errorValue > 0;
+    const errorBaseColor = isPositive ? new THREE.Color(1, 0, 0) : new THREE.Color(0, 0, 1); // Red (+) or Blue (-)
 
-    // 1. Perfect Zone (0 ~ 1 Hz): 밝은 초록색
+    // 1. Perfect Zone (0 ~ 1 Hz): bright green
     if (absError <= 1.0) {
         return { color: safeColor, brightness: 1.0 };
     }
 
-    // 2. Transition Zone 1 (1 ~ 3 Hz): 중간 초록 + 낮은 에러색
-    // 초록색이 지배적이지만 에러색이 섞이기 시작함
-    if (absError <= 3.0) {
-        const t = (absError - 1.0) / 2.0; // 0.0 ~ 1.0
-
-        // Green: 1.0 -> 0.6 (중간 채도)
-        // Error: 0.0 -> 0.4 (낮은 채도)
-        const greenComp = 1.0 - (0.4 * t);
-        const errorComp = 0.4 * t;
-
-        color.copy(safeColor).multiplyScalar(greenComp).add(errorBaseColor.clone().multiplyScalar(errorComp));
-
-        // 밝기는 유지하되 색상이 섞임
-        return { color: color, brightness: 1.0 };
-    }
-
-    // 3. Transition Zone 2 (3 ~ 5 Hz): 낮은 초록 + 중간 에러색
-    // 에러색이 지배적이 되고 초록색은 사라져감
+    // 2. Warning Zone (1 ~ 5 Hz)
     if (absError <= 5.0) {
-        const t = (absError - 3.0) / 2.0; // 0.0 ~ 1.0
-
-        // Green: 0.6 -> 0.0 (사라짐)
-        const greenComp = 0.6 * (1.0 - t);
-
-        // Error: 0.4 -> 0.7 (중간 채도 이상으로 증가)
-        const errorComp = 0.4 + (0.3 * t);
-
-        color.copy(safeColor).multiplyScalar(greenComp).add(errorBaseColor.clone().multiplyScalar(errorComp));
-
-        // 5Hz에서 순수 에러색 구간으로 자연스럽게 넘어가기 위해 밝기 조정 없음 (Components 자체가 밝기 역할)
-        return { color: color, brightness: 1.0 };
+        const t = (absError - 1.0) / 4.0; // 0.0 ~ 1.0 across the zone
+        if (isPositive) {
+            // Positive: mix green with red, keep full brightness
+            const greenComp = 1.0 - (0.4 * t); // 1.0 -> 0.6
+            const redComp = 0.4 * t; // 0.0 -> 0.4
+            color.copy(safeColor).multiplyScalar(greenComp).add(errorBaseColor.clone().multiplyScalar(redComp));
+            return { color: color, brightness: 1.0 };
+        } else {
+            // Negative: pure blue, decreasing brightness
+            const brightness = 1.0 - (0.3 * t); // 1.0 -> 0.7 as error grows
+            color.copy(errorBaseColor);
+            return { color: color, brightness: brightness };
+        }
     }
 
-    // 4. Tension Zone (5 ~ 30 Hz): 순수 에러색 + 밝기/투명도 조절
-    // 초록색 없이 오직 에러색의 강도로만 표현
+    // 3. Tension Zone (5 ~ 30 Hz): pure error color with brightness scaling
     const maxError = 30.0;
     const clampedError = Math.min(absError, maxError);
     const t = (clampedError - 5.0) / (maxError - 5.0); // 0.0 ~ 1.0
-
-    // 밝기: 0.7 -> 1.0 (5Hz에서 70% 밝기로 시작하여 30Hz에서 100%)
-    // 이전 구간 끝(Error 0.7)과 자연스럽게 연결됨
-    const brightness = 0.7 + (0.3 * t);
-
+    let brightness: number;
+    if (isPositive) {
+        // Positive: increase brightness from 0.7 to 1.0
+        brightness = 0.7 + (0.3 * t);
+    } else {
+        // Negative: decrease brightness from 0.7 to 0.3
+        brightness = 0.7 - (0.4 * t);
+    }
     color.copy(errorBaseColor);
     return { color: color, brightness: brightness };
 }
@@ -394,20 +379,27 @@ function ToneFieldMesh({
 
                 const { color: fbColor, brightness: fbBrightness } = getErrorColor(fallbackError);
 
-                // 스포트라이트 적용 (비활성화)
+                // 스포트라이트 적용 (원형 강조 효과)
                 let finalBrightness = fbBrightness;
-                // if (hasTarget) {
-                //     const dist = Math.sqrt((x - targetX) ** 2 + (y - targetY) ** 2);
-                //     const maxDist = 1.0;
-                //     const spotlightFactor = Math.max(0, 1.0 - (dist / maxDist));
-                //     // Falloff curve
-                //     const falloff = Math.pow(spotlightFactor, 1.5);
-
-                //     // Highlight logic
-                //     const highlight = Math.pow(Math.max(0, 1.0 - (dist / 0.3)), 3) * 0.5;
-
-                //     finalBrightness = (fbBrightness * 0.3) + (fbBrightness * falloff * 1.2) + highlight;
-                // }
+                if (hasTarget) {
+                    // 타점에서의 거리 계산 (순수 원형 거리)
+                    const dx = x - targetX;
+                    const dy = y - targetY;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    
+                    // 최대 영향 범위
+                    const maxDistance = 0.4;
+                    
+                    // 거리에 따른 밝기 감쇠 (0~1 범위로 정규화)
+                    const normalizedDist = Math.min(distance / maxDistance, 1.0);
+                    
+                    // 더 강한 그라디언트 (지수 높여서 중심부 더 강조)
+                    const gradientFactor = 1.0 - Math.pow(normalizedDist, 2.0);
+                    
+                    // 밝기 조절: 타점 근처는 더 밝게(1.6배), 멀어질수록 원래 밝기로
+                    const spotlightBrightness = 1.6;
+                    finalBrightness = fbBrightness * (1.0 + (spotlightBrightness - 1.0) * gradientFactor);
+                }
 
                 color.copy(fbColor).multiplyScalar(finalBrightness);
                 colorAttr.setXYZ(i, color.r, color.g, color.b);
@@ -426,33 +418,29 @@ function ToneFieldMesh({
             // (+값과 -값이 만나서 0에 가까워지면 자동으로 초록색이 됨)
             const { color: baseColor, brightness } = getErrorColor(mixedError);
 
-            // 3. 스포트라이트 효과 적용 (Spotlight Effect) - 비활성화
-            // 영역(Zone)은 고정하고, 타점 주변만 밝게 강조
+            // 3. 스포트라이트 효과 적용 (원형 강조 효과)
+            // 타점 좌표 중심으로 원형으로 밝게 강조, 멀어질수록 그라디언트로 어둡게
             let finalBrightness = brightness;
 
-            // if (hasTarget) {
-            //     // 타점과 현재 버텍스 사이의 거리 계산
-            //     // 정규화된 좌표계 사용 (x: -0.3~0.3, y: -0.425~0.425)
-            //     const dx = x - targetX;
-            //     const dy = y - targetY;
-            //     const distance = Math.sqrt(dx * dx + dy * dy);
-
-            //     // 거리 기반 감쇠 (Distance Attenuation) - 더 극적인 효과를 위해 조정
-            //     // [사용자 조절 가이드]
-            //     // 1. maxBrightness: 타점 중심의 최대 밝기 (현재 2.0 = 200%)
-            //     // 2. minBrightness: 타점 반대편의 최소 밝기 (현재 0.1 = 10%)
-            //     // 3. falloffFactor: 밝기가 어두워지는 속도 (클수록 급격히 어두워짐, 현재 3.0)
-
-            //     const maxBrightness = 2.0;
-            //     const minBrightness = 0.1;
-            //     const falloffFactor = 3.0;
-
-            //     // distance 0 -> factor = maxBrightness (2.0)
-            //     // distance가 커질수록 급격히 감소하여 minBrightness (0.1)로 수렴
-            //     const spotlightFactor = Math.max(minBrightness, maxBrightness - distance * falloffFactor);
-
-            //     finalBrightness = brightness * spotlightFactor;
-            // }
+            if (hasTarget) {
+                // 타점에서의 거리 계산 (순수 원형 거리)
+                const dx = x - targetX;
+                const dy = y - targetY;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                // 최대 영향 범위
+                const maxDistance = 0.4;
+                
+                // 거리에 따른 밝기 감쇠 (0~1 범위로 정규화)
+                const normalizedDist = Math.min(distance / maxDistance, 1.0);
+                
+                // 더 강한 그라디언트 (지수 높여서 중심부 더 강조)
+                const gradientFactor = 1.0 - Math.pow(normalizedDist, 2.0);
+                
+                // 밝기 조절: 타점 근처는 더 밝게(1.6배), 멀어질수록 원래 밝기로
+                const spotlightBrightness = 1.6;
+                finalBrightness = brightness * (1.0 + (spotlightBrightness - 1.0) * gradientFactor);
+            }
 
             // 밝기 적용 (색상 * 최종 밝기)
             color.copy(baseColor).multiplyScalar(finalBrightness);
