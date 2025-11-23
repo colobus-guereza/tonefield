@@ -13,6 +13,10 @@ const nextConfig: NextConfig = {
           {
             key: 'Content-Security-Policy',
             value: "frame-ancestors *"
+          },
+          {
+            key: 'Access-Control-Allow-Origin',
+            value: '*'
           }
         ]
       }
