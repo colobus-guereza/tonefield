@@ -7,30 +7,37 @@ import * as THREE from "three";
 
 // Props 인터페이스 정의
 export interface ToneField3DProps {
-  // 기본 설정
-  tension?: number;
-  wireframe?: boolean;
-  cameraView?: 'perspective' | 'top';
-  
-  // 타점 데이터
-  hitPointLocation?: "internal" | "external" | null;
-  hitPointCoordinate?: string;
-  hitPointStrength?: string;
-  hitPointCount?: string;
-  hammeringType?: string;
-  
-  // 콜백 함수
-  onTensionChange?: (tension: number) => void;
-  onCameraViewChange?: (view: 'perspective' | 'top') => void;
-  
-  // 스타일
-  width?: string | number;
-  height?: string | number;
-  className?: string;
-  
-  // Supabase 설정 (선택적)
-  supabaseUrl?: string;
-  supabaseKey?: string;
+    // 기본 설정
+    tension?: number;
+    wireframe?: boolean;
+    cameraView?: 'perspective' | 'top';
+
+    // 타점 데이터
+    hitPointLocation?: "internal" | "external" | null;
+    hitPointCoordinate?: string;
+    hitPointStrength?: string;
+    hitPointCount?: string;
+    hammeringType?: string;
+
+    // 조율 오차 (장력 시각화)
+    tuningErrors?: {
+        tonic: number;    // Hz 오차
+        octave: number;   // Hz 오차
+        fifth: number;    // Hz 오차
+    };
+
+    // 콜백 함수
+    onTensionChange?: (tension: number) => void;
+    onCameraViewChange?: (view: 'perspective' | 'top') => void;
+
+    // 스타일
+    width?: string | number;
+    height?: string | number;
+    className?: string;
+
+    // Supabase 설정 (선택적)
+    supabaseUrl?: string;
+    supabaseKey?: string;
 }
 
 // Custom Geometry Generator for Elliptical Tonefield
@@ -95,7 +102,62 @@ function createTonefieldGeometry(width: number, height: number, radialSegments: 
     return geometry;
 }
 
-function ToneFieldMesh({ tension, wireframe }: { tension: number, wireframe: boolean }) {
+/**
+ * 오차값을 색상으로 변환하는 유틸리티 함수
+ * @param errorValue - 조율 오차 (Hz 단위)
+ * @returns THREE.Color 객체
+ */
+function getErrorColor(errorValue: number): THREE.Color {
+    const color = new THREE.Color();
+    const absError = Math.abs(errorValue);
+
+    // 허용 오차 범위 설정 (0~30Hz 범위로 정규화)
+    const maxError = 30.0;
+    const normalizedError = Math.min(absError / maxError, 1.0);
+
+    if (absError < 0.1) {
+        // 오차가 거의 없음: 초록색 (안정)
+        color.setRGB(0, 1, 0);
+    } else if (errorValue > 0) {
+        // 과장력 (Over-tension): Green → Yellow → Red
+        if (normalizedError < 0.5) {
+            // Green to Yellow
+            const t = normalizedError * 2;
+            color.setRGB(t, 1, 0);
+        } else {
+            // Yellow to Red
+            const t = (normalizedError - 0.5) * 2;
+            color.setRGB(1, 1 - t, 0);
+        }
+    } else {
+        // 저장력 (Under-tension): Green → Cyan → Blue
+        if (normalizedError < 0.5) {
+            // Green to Cyan
+            const t = normalizedError * 2;
+            color.setRGB(0, 1, t);
+        } else {
+            // Cyan to Blue
+            const t = (normalizedError - 0.5) * 2;
+            color.setRGB(0, 1 - t, 1);
+        }
+    }
+
+    return color;
+}
+
+function ToneFieldMesh({
+    tension,
+    wireframe,
+    tuningErrors
+}: {
+    tension: number;
+    wireframe: boolean;
+    tuningErrors?: {
+        tonic: number;   // Hz 오차
+        octave: number;  // Hz 오차
+        fifth: number;   // Hz 오차
+    };
+}) {
     const meshRef = useRef<THREE.Mesh>(null);
 
     const geometry = useMemo(() => {
@@ -110,25 +172,70 @@ function ToneFieldMesh({ tension, wireframe }: { tension: number, wireframe: boo
         const count = posAttr.count;
         const color = new THREE.Color();
 
+        // 메쉬 크기 정보
+        const width = 0.6;
+        const height = 0.85;
+
+        // 조율 오차가 있는 경우, 각 영역별 타겟 색상 미리 계산
+        let colOctave: THREE.Color;
+        let colTonic: THREE.Color;
+        let colFifth: THREE.Color;
+
+        if (tuningErrors) {
+            colOctave = getErrorColor(tuningErrors.octave);
+            colTonic = getErrorColor(tuningErrors.tonic);
+            colFifth = getErrorColor(tuningErrors.fifth);
+        } else {
+            // 기본 색상 (모두 초록색)
+            colOctave = new THREE.Color(0, 1, 0);
+            colTonic = new THREE.Color(0, 1, 0);
+            colFifth = new THREE.Color(0, 1, 0);
+        }
+
         for (let i = 0; i < count; i++) {
-            const y = posAttr.getY(i);
-            const h = THREE.MathUtils.clamp(y, 0, 1);
+            const x = posAttr.getX(i);
+            const y = posAttr.getY(i); // 실제 높이값 (딤플)
+            const z = posAttr.getZ(i); // 평면상 세로축 (Top/Bottom)
 
-            const baseHue = 0.6 * (1 - tension);
-            const hueShift = 0.2 * h;
-            let finalHue = baseHue - hueShift;
-            if (finalHue < 0) finalHue += 1;
-            finalHue = Math.max(0, finalHue);
+            // 정규화된 거리 계산 (딤플 영역 판별용)
+            const r = Math.sqrt(Math.pow(x / (width / 2), 2) + Math.pow(z / (height / 2), 2));
 
-            const s = 1.0;
-            const l = 0.5 + 0.3 * h;
+            // A. 딤플 영역 (중심부): 기존 금속 재질 색상 유지
+            if (r < 0.35) {
+                // 딤플은 높이(y)에 따라 밝은 회색 계열
+                const brightness = 0.4 + 0.3 * THREE.MathUtils.clamp(y * 10, 0, 1);
+                color.setRGB(brightness, brightness, brightness);
+                colorAttr.setXYZ(i, color.r, color.g, color.b);
+                continue;
+            }
 
-            color.setHSL(finalHue, s, l);
-            colorAttr.setXYZ(i, color.r, color.g, color.b);
+            // B. 도넛 영역 (장력 시각화): 가중치 블렌딩
+            // 좌표계: z > 0 = 위쪽 (Octave), z < 0 = 아래쪽 (Tonic), x = 좌우 (Fifth)
+
+            // 가중치 계산 (부드러운 그라데이션을 위해 절대값 사용)
+            const wOctave = Math.max(z, 0);           // 위쪽 (z > 0)
+            const wTonic = Math.max(-z, 0);           // 아래쪽 (z < 0)
+            const wFifth = Math.abs(x);               // 양 옆
+
+            const totalW = wOctave + wTonic + wFifth;
+
+            // 안전장치: 가중치 합이 0이면 기본 초록색
+            if (totalW <= 0.001) {
+                color.setRGB(0, 1, 0);
+                colorAttr.setXYZ(i, color.r, color.g, color.b);
+                continue;
+            }
+
+            // 색상 블렌딩 (RGB 채널별 가중 평균)
+            const rVal = (colOctave.r * wOctave + colTonic.r * wTonic + colFifth.r * wFifth) / totalW;
+            const gVal = (colOctave.g * wOctave + colTonic.g * wTonic + colFifth.g * wFifth) / totalW;
+            const bVal = (colOctave.b * wOctave + colTonic.b * wTonic + colFifth.b * wFifth) / totalW;
+
+            colorAttr.setXYZ(i, rVal, gVal, bVal);
         }
 
         colorAttr.needsUpdate = true;
-    }, [tension, geometry]);
+    }, [tension, geometry, tuningErrors]);
 
     return (
         <mesh ref={meshRef} geometry={geometry}>
@@ -147,7 +254,7 @@ function ToneFieldMesh({ tension, wireframe }: { tension: number, wireframe: boo
 function TonefieldBoundaries({ hitPointLocation }: { hitPointLocation: "internal" | "external" | null }) {
     let color: number;
     let opacity: number;
-    
+
     if (hitPointLocation === "internal") {
         color = 0x3b82f6;
         opacity = 1.0;
@@ -163,11 +270,11 @@ function TonefieldBoundaries({ hitPointLocation }: { hitPointLocation: "internal
         const curve = new THREE.EllipseCurve(0, 0, 0.3, 0.425, 0, 2 * Math.PI, false, 0);
         const points = curve.getPoints(64);
         const geometry = new THREE.BufferGeometry().setFromPoints(points);
-        const material = new THREE.LineBasicMaterial({ 
-            color: color, 
+        const material = new THREE.LineBasicMaterial({
+            color: color,
             transparent: true,
             opacity: opacity,
-            linewidth: 2 
+            linewidth: 2
         });
         const line = new THREE.Line(geometry, material);
         line.rotation.x = -Math.PI / 2;
@@ -178,11 +285,11 @@ function TonefieldBoundaries({ hitPointLocation }: { hitPointLocation: "internal
         const curve = new THREE.EllipseCurve(0, 0, 0.3 * 0.35, 0.425 * 0.35, 0, 2 * Math.PI, false, 0);
         const points = curve.getPoints(64);
         const geometry = new THREE.BufferGeometry().setFromPoints(points);
-        const material = new THREE.LineBasicMaterial({ 
-            color: color, 
+        const material = new THREE.LineBasicMaterial({
+            color: color,
             transparent: true,
             opacity: opacity,
-            linewidth: 1.5 
+            linewidth: 1.5
         });
         const line = new THREE.Line(geometry, material);
         line.rotation.x = -Math.PI / 2;
@@ -318,6 +425,7 @@ export function ToneField3D({
     hitPointStrength,
     hitPointCount,
     hammeringType,
+    tuningErrors,
     onTensionChange,
     onCameraViewChange,
     width = '100%',
@@ -346,11 +454,11 @@ export function ToneField3D({
     };
 
     return (
-        <div 
+        <div
             className={className}
-            style={{ 
-                width, 
-                height, 
+            style={{
+                width,
+                height,
                 backgroundColor: '#000000',
                 position: 'relative'
             }}
@@ -371,7 +479,11 @@ export function ToneField3D({
 
                 <CoordinateGrid />
                 <TonefieldBoundaries hitPointLocation={hitPointLocation} />
-                <ToneFieldMesh tension={internalTension} wireframe={wireframe} />
+                <ToneFieldMesh
+                    tension={internalTension}
+                    wireframe={wireframe}
+                    tuningErrors={tuningErrors}
+                />
 
                 {hitPointCoordinate && hitPointStrength && hitPointCount && hammeringType && (() => {
                     const match = hitPointCoordinate.match(/\(([^,]+),\s*([^)]+)\)/);

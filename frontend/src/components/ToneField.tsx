@@ -92,8 +92,54 @@ function createTonefieldGeometry(width: number, height: number, radialSegments: 
     return geometry;
 }
 
-function ToneFieldMesh({ tension, wireframe }: { tension: number, wireframe: boolean }) {
-    const meshRef = useRef<THREE.Mesh>(null);
+/**
+ * 오차값을 색상으로 변환하는 유틸리티 함수
+ * @param errorValue - 조율 오차 (Hz 단위)
+ * @returns THREE.Color 객체
+ */
+function getErrorColor(errorValue: number): THREE.Color {
+    const color = new THREE.Color();
+    const absError = Math.abs(errorValue);
+
+    // 허용 오차 범위 설정 (0~30Hz 범위로 정규화)
+    const maxError = 30.0;
+    const normalizedError = Math.min(absError / maxError, 1.0);
+
+    if (absError < 0.1) {
+        // 오차가 거의 없음: 초록색 (조율 완료)
+        color.setRGB(0, 1, 0);
+    } else if (errorValue > 0) {
+        // 과장력 (Over-tension): 빨간색 (밝기만 조절)
+        // normalizedError가 0에 가까우면 어두운 빨강, 1에 가까우면 밝은 빨강
+        const brightness = 0.3 + 0.7 * normalizedError; // 0.3 ~ 1.0
+        color.setRGB(brightness, 0, 0);
+    } else {
+        // 저장력 (Under-tension): 파란색 (밝기만 조절)
+        // normalizedError가 0에 가까우면 어두운 파랑, 1에 가까우면 밝은 파랑
+        const brightness = 0.3 + 0.7 * normalizedError; // 0.3 ~ 1.0
+        color.setRGB(0, 0, brightness);
+    }
+
+    return color;
+}
+
+function ToneFieldMesh({
+    tension,
+    wireframe,
+    meshRef,
+    tuningErrors,
+    hitPointLocation
+}: {
+    tension: number;
+    wireframe: boolean;
+    meshRef: React.RefObject<THREE.Mesh>;
+    tuningErrors?: {
+        tonic: number;
+        octave: number;
+        fifth: number;
+    };
+    hitPointLocation?: "internal" | "external" | null;
+}) {
 
     // Parameters for the ellipse
     const width = 10; // Major axis
@@ -106,6 +152,9 @@ function ToneFieldMesh({ tension, wireframe }: { tension: number, wireframe: boo
         return createTonefieldGeometry(0.6, 0.85, 64, 32);
     }, []);
 
+    // 원본 z 값 저장 (딤플 반전을 위해)
+    const originalZValues = useRef<Float32Array | null>(null);
+
     useEffect(() => {
         if (!meshRef.current) return;
         const geo = meshRef.current.geometry;
@@ -114,50 +163,112 @@ function ToneFieldMesh({ tension, wireframe }: { tension: number, wireframe: boo
         const count = posAttr.count;
         const color = new THREE.Color();
 
-        for (let i = 0; i < count; i++) {
-            const z = posAttr.getZ(i); // Height is now in Z-axis
-
-            // Visualization Logic:
-            // We want to visualize "Tension".
-            // Let's assume the "Dimple" (center) has the most tension variation.
-            // z ranges roughly from 0 to 1.0 (dimple height).
-
-            // Map Height (z) and Global Tension (tension prop) to Color.
-
-            // 1. Normalize height (0 to ~1)
-            const h = THREE.MathUtils.clamp(z, 0, 1);
-
-            // 2. Color Logic
-            // If Tension is High (1.0) -> Whole field is "Tight" -> Warm colors (Red/Orange)
-            // If Tension is Low (0.0) -> Whole field is "Loose" -> Cool colors (Blue/Purple)
-            // AND, we want to see the gradient across the shape.
-
-            // Let's try:
-            // Base Hue depends on Tension (0=Blue/0.6, 1=Red/0.0)
-            // Local variation depends on Height (Higher = Tighter/Warmer?)
-
-            // Global Base:
-            const baseHue = 0.6 * (1 - tension); // 0.6 (Blue) -> 0.0 (Red)
-
-            // Local Variation (Height adds "heat"):
-            // If y is high (dimple), it's "tighter" or "more active".
-            // Let's shift hue towards Red as Y increases.
-            const hueShift = 0.2 * h;
-            let finalHue = baseHue - hueShift;
-            if (finalHue < 0) finalHue += 1; // Wrap or clamp? Red is 0.
-            finalHue = Math.max(0, finalHue);
-
-            // Saturation/Lightness
-            const s = 1.0;
-            const l = 0.5 + 0.3 * h; // Higher = Brighter
-
-            color.setHSL(finalHue, s, l);
-
-            colorAttr.setXYZ(i, color.r, color.g, color.b);
+        // 원본 z 값 저장 (최초 1회만)
+        if (!originalZValues.current) {
+            originalZValues.current = new Float32Array(count);
+            for (let i = 0; i < count; i++) {
+                originalZValues.current[i] = posAttr.getZ(i);
+            }
         }
 
+        // 외부 타점일 때 딤플 방향 반전 (z 값 반전)
+        const invertDimple = hitPointLocation === "external";
+
+        // 원본 z 값에서 복원하거나 반전
+        if (originalZValues.current) {
+            for (let i = 0; i < count; i++) {
+                const originalZ = originalZValues.current[i];
+                const z = invertDimple ? -originalZ : originalZ;
+                posAttr.setZ(i, z);
+            }
+        }
+
+        // 메쉬 크기 정보
+        const geometryWidth = 0.6;
+        const geometryHeight = 0.85;
+
+        // 🔍 디버깅: tuningErrors 값 로그
+        console.log('🎨 ToneFieldMesh - tuningErrors:', tuningErrors);
+
+        // 조율 오차가 있는 경우, 각 영역별 타겟 색상 미리 계산
+        let colOctave: THREE.Color;
+        let colTonic: THREE.Color;
+        let colFifth: THREE.Color;
+
+        if (tuningErrors) {
+            colOctave = getErrorColor(tuningErrors.octave);
+            colTonic = getErrorColor(tuningErrors.tonic);
+            colFifth = getErrorColor(tuningErrors.fifth);
+
+            // 🔍 디버깅: 계산된 색상 로그
+            console.log('🎨 색상 계산 결과:');
+            console.log('  - Octave (위쪽):', tuningErrors.octave, 'Hz →', `rgb(${Math.round(colOctave.r * 255)}, ${Math.round(colOctave.g * 255)}, ${Math.round(colOctave.b * 255)})`);
+            console.log('  - Tonic (아래쪽):', tuningErrors.tonic, 'Hz →', `rgb(${Math.round(colTonic.r * 255)}, ${Math.round(colTonic.g * 255)}, ${Math.round(colTonic.b * 255)})`);
+            console.log('  - Fifth (좌우):', tuningErrors.fifth, 'Hz →', `rgb(${Math.round(colFifth.r * 255)}, ${Math.round(colFifth.g * 255)}, ${Math.round(colFifth.b * 255)})`);
+        } else {
+            // 기본 색상 (모두 초록색)
+            colOctave = new THREE.Color(0, 1, 0);
+            colTonic = new THREE.Color(0, 1, 0);
+            colFifth = new THREE.Color(0, 1, 0);
+            console.log('🎨 tuningErrors가 없음 - 기본 초록색 사용');
+        }
+
+        for (let i = 0; i < count; i++) {
+            const x = posAttr.getX(i);
+            const y = posAttr.getY(i); // Y축이 평면상 세로축
+            const z = posAttr.getZ(i); // Z축이 실제 높이값 (딤플, 이미 반전됨)
+
+            // 정규화된 거리 계산 (딤플 영역 판별용)
+            // ToneField.tsx에서는 XY 평면이므로 x, y 사용
+            const r = Math.sqrt(Math.pow(x / (geometryWidth / 2), 2) + Math.pow(y / (geometryHeight / 2), 2));
+
+            // A. 딤플 영역 (중심부): 매우 어두운 회색
+            if (r < 0.35) {
+                // 딤플은 매우 어두운 회색 (0.05 ~ 0.15 범위)
+                const brightness = 0.05 + 0.1 * THREE.MathUtils.clamp(Math.abs(z) * 10, 0, 1);
+                color.setRGB(brightness, brightness, brightness);
+                colorAttr.setXYZ(i, color.r, color.g, color.b);
+                continue;
+            }
+
+            // B. 도넛 영역 (장력 시각화): 가중치 블렌딩
+            // ToneField.tsx 좌표계: y > 0 = 위쪽 (Octave), y < 0 = 아래쪽 (Tonic), x = 좌우 (Fifth)
+
+            // 가중치 계산 (부드러운 그라데이션을 위해 절대값 사용)
+            const wOctave = Math.max(y, 0);           // 위쪽 (y > 0)
+            const wTonic = Math.max(-y, 0);           // 아래쪽 (y < 0)
+            const wFifth = Math.abs(x);               // 양 옆
+
+            const totalW = wOctave + wTonic + wFifth;
+
+            // 안전장치: 가중치 합이 0이면 기본 초록색
+            if (totalW <= 0.001) {
+                color.setRGB(0, 1, 0);
+                colorAttr.setXYZ(i, color.r, color.g, color.b);
+                continue;
+            }
+
+            // 색상 블렌딩 (RGB 채널별 가중 평균)
+            const rVal = (colOctave.r * wOctave + colTonic.r * wTonic + colFifth.r * wFifth) / totalW;
+            const gVal = (colOctave.g * wOctave + colTonic.g * wTonic + colFifth.g * wFifth) / totalW;
+            const bVal = (colOctave.b * wOctave + colTonic.b * wTonic + colFifth.b * wFifth) / totalW;
+
+            colorAttr.setXYZ(i, rVal, gVal, bVal);
+
+            // 🔍 디버깅: 일부 버텍스 색상 샘플링
+            if (i % 200 === 0) {
+                console.log(`  버텍스 ${i}: pos(${x.toFixed(2)}, ${y.toFixed(2)}, ${z.toFixed(2)}) 가중치(Oct:${wOctave.toFixed(2)}, Ton:${wTonic.toFixed(2)}, Fif:${wFifth.toFixed(2)}) → rgb(${Math.round(rVal * 255)}, ${Math.round(gVal * 255)}, ${Math.round(bVal * 255)})`);
+            }
+        }
+
+        console.log('🎨 ===== 색상 계산 완료 =====');
+
         colorAttr.needsUpdate = true;
-    }, [tension, geometry]);
+        posAttr.needsUpdate = true;
+
+        // 노말 재계산 (z 값이 변경되었으므로)
+        geo.computeVertexNormals();
+    }, [geometry, tuningErrors, meshRef, hitPointLocation]);  // tension 제거 - tuningErrors만으로 색상 제어
 
     useFrame((state) => {
         if (!meshRef.current) return;
@@ -167,34 +278,85 @@ function ToneFieldMesh({ tension, wireframe }: { tension: number, wireframe: boo
 
     return (
         <mesh ref={meshRef} geometry={geometry}>
-            <meshStandardMaterial
-                vertexColors
+            <meshBasicMaterial
+                vertexColors={true}  // 항상 vertexColors 사용
                 wireframe={wireframe}
                 side={THREE.DoubleSide}
-                metalness={0.5}
-                roughness={0.2}
-                color={wireframe ? "cyan" : "white"}
+                color={wireframe ? undefined : undefined}  // color 속성 제거하여 vertexColors만 사용
+                transparent={false}
+                opacity={1}
             />
         </mesh>
     );
 }
 
+// Double click handler component
+function DoubleClickHandler({
+    onDoubleClick,
+    meshRef
+}: {
+    onDoubleClick: (x: number, y: number) => void;
+    meshRef: React.RefObject<THREE.Mesh>;
+}) {
+    const { camera, raycaster, scene, gl } = useThree();
+    const [mouse] = useState(() => new THREE.Vector2());
+
+    useEffect(() => {
+        const handleDoubleClick = (event: MouseEvent) => {
+            // Prevent default behavior
+            event.preventDefault();
+            event.stopPropagation();
+
+            // Get canvas element
+            const canvas = gl.domElement;
+            const rect = canvas.getBoundingClientRect();
+
+            // Calculate normalized device coordinates (-1 to +1)
+            mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+            // Update raycaster
+            raycaster.setFromCamera(mouse, camera);
+
+            // Check intersection with tonefield mesh
+            if (meshRef.current) {
+                const intersects = raycaster.intersectObject(meshRef.current);
+
+                if (intersects.length > 0) {
+                    const point = intersects[0].point;
+                    const x = point.x;
+                    const y = point.y;
+
+                    // Check if point is within ellipse boundary
+                    // Ellipse: (x/0.3)^2 + (y/0.425)^2 <= 1
+                    const radiusX = 0.3;
+                    const radiusY = 0.425;
+                    const ellipseValue = (x * x) / (radiusX * radiusX) + (y * y) / (radiusY * radiusY);
+
+                    if (ellipseValue <= 1.0) {
+                        // Point is within tonefield boundary
+                        onDoubleClick(x, y);
+                    }
+                }
+            }
+        };
+
+        const canvas = gl.domElement;
+        canvas.addEventListener('dblclick', handleDoubleClick);
+
+        return () => {
+            canvas.removeEventListener('dblclick', handleDoubleClick);
+        };
+    }, [camera, raycaster, scene, gl, mouse, meshRef, onDoubleClick]);
+
+    return null;
+}
+
 // Component for tonefield boundary lines
 function TonefieldBoundaries({ hitPointLocation }: { hitPointLocation: "internal" | "external" | null }) {
-    // 초기 상태: 투명도 80% 회색, 타점값에 따라 파란색(내부) 또는 빨간색(외부)
-    let color: number;
-    let opacity: number;
-
-    if (hitPointLocation === "internal") {
-        color = 0x3b82f6; // Blue for internal
-        opacity = 1.0;
-    } else if (hitPointLocation === "external") {
-        color = 0xdc2626; // Red for external
-        opacity = 1.0;
-    } else {
-        color = 0x808080; // Gray for initial state
-        opacity = 0.8;
-    }
+    // 모든 경우에 투명도 80% 회색 사용
+    const color = 0x808080; // Gray
+    const opacity = 0.8;
 
     const outerLine = useMemo(() => {
         const curve = new THREE.EllipseCurve(
@@ -325,8 +487,30 @@ function TonefieldBoundaries({ hitPointLocation }: { hitPointLocation: "internal
     );
 }
 
+// Component for location text in dimple center
+function LocationText({ hitPointLocation }: { hitPointLocation: "internal" | "external" | null }) {
+    if (!hitPointLocation) return null;
+
+    // 딤플 중앙 위치 (약간 위로 올려서 표시)
+    // 외부일 때는 딤플이 반전되므로 z 위치도 조정
+    const dimpleCenterZ = hitPointLocation === "external" ? -0.05 : 0.05;
+
+    return (
+        <Html
+            position={[0, 0, dimpleCenterZ]}
+            center
+            zIndexRange={[100, 0]}
+            style={{ pointerEvents: 'none' }}
+        >
+            <div className="text-gray-400/40 text-2xl font-bold drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] whitespace-nowrap">
+                {hitPointLocation === "internal" ? "내부" : "외부"}
+            </div>
+        </Html>
+    );
+}
+
 // Component for animated ring around hit point
-function AnimatedRing({ position }: { position: [number, number, number] }) {
+function AnimatedRing({ position, color }: { position: [number, number, number]; color: string }) {
     const ringRef = useRef<THREE.Mesh>(null);
 
     useFrame((state) => {
@@ -348,7 +532,7 @@ function AnimatedRing({ position }: { position: [number, number, number] }) {
         <mesh ref={ringRef} position={position}>
             {/* Reduced size by 50% - Already in XY plane */}
             <ringGeometry args={[0.015, 0.025, 32]} />
-            <meshBasicMaterial color="#00ffff" transparent opacity={0.8} side={THREE.DoubleSide} />
+            <meshBasicMaterial color={color} transparent opacity={0.8} side={THREE.DoubleSide} />
         </mesh>
     );
 }
@@ -359,13 +543,15 @@ function HitPointMarker({
     y,
     strength,
     count,
-    hammeringType
+    hammeringType,
+    intent
 }: {
     x: number;
     y: number;
-    strength: string;
-    count: string;
-    hammeringType: string;
+    strength?: string;
+    count?: string;
+    hammeringType?: string;
+    intent?: string;
 }) {
     // Convert 2D tonefield coordinates to 3D world coordinates
     // x maps to X-axis, y maps to Y-axis (XY plane)
@@ -373,37 +559,47 @@ function HitPointMarker({
     const worldY = y;
     const worldZ = 0.002; // Slightly above the tonefield surface
 
+    // Check if we have full information to show label
+    const hasFullInfo = strength && count && hammeringType;
+
+    // 의도에 따른 색상 설정
+    // 상향 → 붉은색, 하향 → 파란색
+    const markerColor = intent === "상향" ? "#dc2626" : intent === "하향" ? "#3b82f6" : "#ff0066";
+    const ringColor = intent === "상향" ? "#ff0000" : intent === "하향" ? "#00ffff" : "#00ffff";
+
     return (
         <group>
             {/* Hit point marker sphere - Reduced size by 50% */}
             <mesh position={[worldX, worldY, worldZ]}>
                 <sphereGeometry args={[0.01, 16, 16]} />
-                <meshStandardMaterial color="#ff0066" emissive="#ff0066" emissiveIntensity={0.5} />
+                <meshStandardMaterial color={markerColor} emissive={markerColor} emissiveIntensity={0.5} />
             </mesh>
 
             {/* Animated ring around hit point */}
-            <AnimatedRing position={[worldX, worldY, worldZ]} />
+            <AnimatedRing position={[worldX, worldY, worldZ]} color={ringColor} />
 
-            {/* Info label using HTML overlay for better styling and no overlap */}
-            <Html
-                position={[worldX, worldY, worldZ]}
-                zIndexRange={[100, 0]}
-                center
-                style={{ pointerEvents: 'none' }}
-            >
-                <div className="transform -translate-y-12 min-w-[140px]">
-                    <div className="bg-gray-900/95 backdrop-blur-sm border border-gray-700 rounded-lg shadow-xl px-3 py-2 flex flex-col items-center gap-0.5">
-                        <div className="text-gray-100 font-bold text-sm whitespace-nowrap font-mono">
-                            {strength} × {count}
+            {/* Info label using HTML overlay - only show if we have full info */}
+            {hasFullInfo && (
+                <Html
+                    position={[worldX, worldY, worldZ]}
+                    zIndexRange={[100, 0]}
+                    center
+                    style={{ pointerEvents: 'none' }}
+                >
+                    <div className="transform -translate-y-12 min-w-[140px]">
+                        <div className="bg-gray-900/95 backdrop-blur-sm border border-gray-700 rounded-lg shadow-xl px-3 py-2 flex flex-col items-center gap-0.5">
+                            <div className="text-gray-100 font-bold text-sm whitespace-nowrap font-mono">
+                                {strength} × {count}
+                            </div>
+                            <div className="text-gray-400 font-bold text-xs whitespace-nowrap">
+                                ({hammeringType})
+                            </div>
+                            {/* Little triangle pointer */}
+                            <div className="absolute -bottom-1.5 left-1/2 transform -translate-x-1/2 w-3 h-3 bg-gray-900 rotate-45 border-r border-b border-gray-700"></div>
                         </div>
-                        <div className="text-gray-400 font-bold text-xs whitespace-nowrap">
-                            ({hammeringType})
-                        </div>
-                        {/* Little triangle pointer */}
-                        <div className="absolute -bottom-1.5 left-1/2 transform -translate-x-1/2 w-3 h-3 bg-gray-900 rotate-45 border-r border-b border-gray-700"></div>
                     </div>
-                </div>
-            </Html>
+                </Html>
+            )}
         </group>
     );
 }
@@ -526,7 +722,9 @@ export function ToneField() {
     const [tension, setTension] = useState(0.5);
     const [wireframe, setWireframe] = useState(true);
     const [cameraView, setCameraView] = useState<'perspective' | 'top'>('top'); // Changed to 'top'
-    const [controlsOpen, setControlsOpen] = useState(false); // Controls panel state - 초기값: 닫힘
+
+    // Mesh ref for double click detection
+    const toneFieldMeshRef = useRef<THREE.Mesh>(null);
 
     // Tuning error states
     const [tonicError, setTonicError] = useState(0);
@@ -899,6 +1097,63 @@ export function ToneField() {
         setTonicError(random5do);
         setOctaveError(randomOctave);
         setFifthError(randomTonic);
+    };
+
+    // Reset all states to initial values
+    const handleReset = () => {
+        // Tuning errors
+        setTonicError(0);
+        setOctaveError(0);
+        setFifthError(0);
+
+        // Hit point parameters
+        setTuningTarget(null);
+        setAuxiliaryTarget(null);
+        setTargetDisplay("");
+        setHitPointIntent("");
+        setHitPointLocation(null);
+        setHitPointCoordinate("");
+        setHitPointStrength("");
+        setHitPointCount("");
+        setHammeringType("");
+
+        // Camera view
+        setCameraView('top');
+
+        // Selected hit point
+        setSelectedHitPoint(null);
+        setExpandedCards(new Set());
+
+        // Tension and wireframe (optional - keep current or reset to defaults)
+        // setTension(0.5);
+        // setWireframe(true);
+    };
+
+    // Reset camera view to top view
+    const handleCameraReset = () => {
+        setCameraView('top');
+    };
+
+    // Handle double click on tonefield
+    const handleDoubleClick = (x: number, y: number) => {
+        // Set hit point coordinate
+        setHitPointCoordinate(`(${x.toFixed(3)}, ${y.toFixed(3)})`);
+
+        // If tuning errors exist, auto-calculate other parameters
+        // Otherwise, just set the coordinate and let user input manually
+        if (tonicError !== 0 || octaveError !== 0 || fifthError !== 0) {
+            // The existing useEffect will automatically calculate other parameters
+            // based on tuning errors and location
+            // We just need to set location if not already set
+            if (!hitPointLocation) {
+                // Determine location based on Y coordinate
+                // Y > 0: external (옥타브 방향), Y < 0: internal (토닉 방향)
+                setHitPointLocation(y >= 0 ? "external" : "internal");
+            }
+        } else {
+            // No tuning errors, just set coordinate
+            // User can manually set other parameters
+        }
     };
 
     // Supabase save handler
@@ -1304,7 +1559,7 @@ export function ToneField() {
                                     <button
                                         onClick={() => setHitPointLocation("internal")}
                                         className={`px-2 py-1.5 rounded-lg text-sm font-medium transition-colors ${hitPointLocation === "internal"
-                                            ? "bg-blue-600 text-white hover:bg-blue-700"
+                                            ? "bg-gray-500 text-white hover:bg-gray-600"
                                             : "bg-gray-700 text-gray-300 hover:bg-gray-600"
                                             }`}
                                     >
@@ -1313,7 +1568,7 @@ export function ToneField() {
                                     <button
                                         onClick={() => setHitPointLocation("external")}
                                         className={`px-2 py-1.5 rounded-lg text-sm font-medium transition-colors ${hitPointLocation === "external"
-                                            ? "bg-red-600 text-white hover:bg-red-700"
+                                            ? "bg-gray-500 text-white hover:bg-gray-600"
                                             : "bg-gray-700 text-gray-300 hover:bg-gray-600"
                                             }`}
                                     >
@@ -1445,11 +1700,33 @@ export function ToneField() {
                     {/* Tonefield boundary lines - 초기: 투명도 80% 회색, 타점값에 따라 파란색(내부) 또는 빨간색(외부) */}
                     <TonefieldBoundaries hitPointLocation={hitPointLocation} />
 
-                    {/* Tonefield mesh with 0.6 x 0.85 dimensions */}
-                    <ToneFieldMesh tension={tension} wireframe={wireframe} />
+                    {/* Location text in dimple center */}
+                    <LocationText hitPointLocation={hitPointLocation} />
 
-                    {/* Hit point marker - only show when coordinates are calculated */}
-                    {hitPointCoordinate && hitPointStrength && hitPointCount && hammeringType && (() => {
+                    {/* Tonefield mesh with 0.6 x 0.85 dimensions */}
+                    <ToneFieldMesh
+                        tension={tension}
+                        wireframe={wireframe}
+                        meshRef={toneFieldMeshRef}
+                        tuningErrors={{
+                            // 변수명과 실제 의미가 교차됨 주의!
+                            tonic: fifthError,    // fifthError는 "토닉" 값 → tonic 영역(아래쪽 y<0)에 사용
+                            octave: octaveError,  // octaveError는 "옥타브" 값 → octave 영역(위쪽 y>0)에 사용
+                            fifth: tonicError     // tonicError는 "5도" 값 → fifth 영역(좌우 x)에 사용
+                        }}
+                        hitPointLocation={hitPointLocation}
+                    />
+
+
+                    {/* Double click handler */}
+                    <DoubleClickHandler
+                        onDoubleClick={handleDoubleClick}
+                        meshRef={toneFieldMeshRef}
+                    />
+
+
+                    {/* Hit point marker - show when coordinates are set */}
+                    {hitPointCoordinate && (() => {
                         // Parse coordinates from string "(x, y)"
                         const match = hitPointCoordinate.match(/\(([^,]+),\s*([^)]+)\)/);
                         if (match) {
@@ -1459,9 +1736,10 @@ export function ToneField() {
                                 <HitPointMarker
                                     x={x}
                                     y={y}
-                                    strength={hitPointStrength}
-                                    count={hitPointCount}
-                                    hammeringType={hammeringType}
+                                    strength={hitPointStrength || undefined}
+                                    count={hitPointCount || undefined}
+                                    hammeringType={hammeringType || undefined}
+                                    intent={hitPointIntent || undefined}
                                 />
                             );
                         }
@@ -1505,8 +1783,8 @@ export function ToneField() {
                             <div className="flex flex-col gap-1 text-right">
                                 {/* Row 1: Location */}
                                 <div className="flex justify-end">
-                                    <span className={`font-bold px-1.5 py-0.5 rounded text-xs ${hitPointLocation === "internal" ? "bg-blue-500/30 text-blue-400" : "bg-red-500/30 text-red-400"}`}>
-                                        {hitPointLocation === "internal" ? "내부" : "외부"}
+                                    <span className={`font-bold px-1.5 py-0.5 rounded text-xs ${hitPointLocation === "internal" ? "bg-gray-500/30 text-gray-300" : hitPointLocation === "external" ? "bg-gray-500/30 text-gray-300" : "bg-gray-500/30 text-gray-400"}`}>
+                                        {hitPointLocation === "internal" ? "내부" : hitPointLocation === "external" ? "외부" : ""}
                                     </span>
                                 </div>
                                 {/* Row 2: Coordinates */}
@@ -1523,97 +1801,58 @@ export function ToneField() {
                     </div>
                 )}
 
-                {/* Floating Control Panel - Top Right */}
-                <div className="absolute top-6 right-6">
-                    {/* Toggle Button */}
-                    {!controlsOpen && (
-                        <button
-                            onClick={() => setControlsOpen(true)}
-                            className="w-10 h-10 rounded-full bg-black/80 backdrop-blur-md border border-white/10 text-white flex items-center justify-center hover:bg-black/90 transition-colors shadow-lg"
-                            title="Open Controls"
+                {/* Control Buttons - Vertical Stack */}
+                <div className="absolute top-6 right-6 flex flex-col gap-3">
+                    {/* Reset Button */}
+                    <button
+                        onClick={handleReset}
+                        className="w-10 h-10 rounded-full bg-black/80 backdrop-blur-md border border-red-500/50 text-white flex items-center justify-center hover:bg-red-600/20 hover:border-red-500 transition-colors shadow-lg"
+                        title="좌표계 초기화"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                    </button>
+
+                    {/* Camera Reset Button - 시점 초기화 */}
+                    <button
+                        onClick={handleCameraReset}
+                        className="w-10 h-10 rounded-full bg-black/80 backdrop-blur-md border border-white/10 text-white flex items-center justify-center hover:bg-black/90 transition-colors shadow-lg"
+                        title="시점 초기화"
+                    >
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            className="h-5 w-5"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
                         >
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
-                            </svg>
-                        </button>
-                    )}
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                    </button>
 
-                    {/* Controls Panel */}
-                    {controlsOpen && (
-                        <div className="w-64 p-4 bg-black/80 backdrop-blur-md rounded-xl border border-white/10 text-white shadow-2xl">
-                            <div className="flex items-center justify-between mb-3">
-                                <h3 className="text-lg font-bold bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">
-                                    Controls
-                                </h3>
-                                <button
-                                    onClick={() => setControlsOpen(false)}
-                                    className="text-gray-400 hover:text-white transition-colors"
-                                    title="Close Controls"
-                                >
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                    </svg>
-                                </button>
-                            </div>
+                    {/* Wireframe Toggle Button - 와이어프레임 토글 */}
+                    <button
+                        onClick={() => setWireframe(!wireframe)}
+                        className={`w-10 h-10 rounded-full backdrop-blur-md border transition-colors shadow-lg flex items-center justify-center ${wireframe
+                            ? "bg-cyan-500/80 border-cyan-400/50 text-black hover:bg-cyan-600/80"
+                            : "bg-black/80 border-white/10 text-white hover:bg-black/90"
+                            }`}
+                        title={wireframe ? "와이어프레임 ON" : "와이어프레임 OFF"}
+                    >
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            className="h-5 w-5"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                        >
+                            {/* 격자/메쉬 아이콘 */}
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM14 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM4 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1v-4zM14 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+                        </svg>
+                    </button>
 
-                            <div className="space-y-4">
-                                {/* Camera View Toggle */}
-                                <div className="flex items-center justify-between">
-                                    <span className="text-xs text-gray-300">Camera View</span>
-                                    <button
-                                        onClick={() => setCameraView(cameraView === 'perspective' ? 'top' : 'perspective')}
-                                        className="w-9 h-9 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 transition-all flex items-center justify-center shadow-lg hover:shadow-xl"
-                                        title={cameraView === 'perspective' ? 'Switch to Top View' : 'Switch to Perspective View'}
-                                    >
-                                        <svg
-                                            xmlns="http://www.w3.org/2000/svg"
-                                            className="h-4 w-4 text-white"
-                                            fill="none"
-                                            viewBox="0 0 24 24"
-                                            stroke="currentColor"
-                                        >
-                                            {cameraView === 'perspective' ? (
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
-                                            ) : (
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
-                                            )}
-                                        </svg>
-                                    </button>
-                                </div>
-
-                                {/* Tension Slider */}
-                                <div className="space-y-1">
-                                    <div className="flex justify-between text-xs text-gray-300">
-                                        <span>Tension</span>
-                                        <span className="font-mono text-cyan-300">{tension.toFixed(2)}</span>
-                                    </div>
-                                    <input
-                                        type="range"
-                                        min="0"
-                                        max="1"
-                                        step="0.01"
-                                        value={tension}
-                                        onChange={(e) => setTension(parseFloat(e.target.value))}
-                                        className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
-                                    />
-                                </div>
-
-                                {/* Wireframe Toggle */}
-                                <div className="flex items-center justify-between">
-                                    <span className="text-xs text-gray-300">Wireframe</span>
-                                    <button
-                                        onClick={() => setWireframe(!wireframe)}
-                                        className={`px-3 py-1 rounded-full text-xs font-bold transition-colors ${wireframe
-                                            ? "bg-cyan-500 text-black"
-                                            : "bg-gray-700 text-gray-400 hover:bg-gray-600"
-                                            }`}
-                                    >
-                                        {wireframe ? "ON" : "OFF"}
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    )}
                 </div>
             </div>
 
@@ -1706,9 +1945,9 @@ export function ToneField() {
                                                     </div>
                                                     {/* Right: Instructions */}
                                                     <div className="flex flex-col justify-center gap-2 pl-4 bg-gray-800/50 min-w-0">
-                                                        <div className={`flex justify-between items-center rounded px-3 py-2 border ${hitPoint.location === "internal" ? "bg-blue-900/20 border-blue-700/50" : "bg-red-900/20 border-red-700/50"}`}>
+                                                        <div className={`flex justify-between items-center rounded px-3 py-2 border ${hitPoint.location === "internal" ? "bg-gray-800/50 border-gray-700/50" : "bg-gray-800/50 border-gray-700/50"}`}>
                                                             <span className="text-xs text-gray-400">타격 위치</span>
-                                                            <span className={`font-bold text-sm ${hitPoint.location === "internal" ? "text-blue-300" : "text-red-300"}`}>
+                                                            <span className={`font-bold text-sm text-gray-300`}>
                                                                 {hitPoint.location === "internal" ? "내부" : "외부"}
                                                             </span>
                                                         </div>
@@ -1775,7 +2014,7 @@ export function ToneField() {
                     style={{ zIndex: 10 }}
                 ></div>
             </div >
-        </div>
+        </div >
     );
 }
 
