@@ -74,10 +74,6 @@ export function calculateHitPointCoordinate(
   let vectorX = 0;
   let vectorY = 0;
 
-  // Apply angular masking to prevent side region (fifth) from invading the top region.
-  // The mask reduces the side component as the angle approaches the vertical (top) direction.
-  // mask = 1 - sin(theta) where theta is the angle from the horizontal axis.
-  // This will be applied after vector forces are determined.
 
   if (primary.type === 'fifth') {
     const isRight = Math.random() >= 0.5;
@@ -115,10 +111,6 @@ export function calculateHitPointCoordinate(
 
   // 각도 계산 및 타원 좌표 매핑
   const theta = Math.atan2(vectorY, vectorX);
-  // Compute mask based on angle (0 = horizontal, π/2 = vertical)
-  const mask = 1.0 - Math.sin(Math.abs(theta));
-  // Apply mask only to the side (X) component when the primary target is not the top region.
-  vectorX *= mask;
   const x = RADIUS_X * Math.cos(theta);
   const y = RADIUS_Y * Math.sin(theta);
 

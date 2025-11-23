@@ -1,16 +1,20 @@
 "use client";
 
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { OrbitControls, PerspectiveCamera, Text, Html } from "@react-three/drei";
+import { OrbitControls, PerspectiveCamera, Text, Html, Stars } from "@react-three/drei";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
+import SpacePterosaur from "./metaverse/objects/SpacePterosaur";
+
+// 카메라 프리셋 타입 정의
+export type CameraPreset = 'top' | 'perspective' | 'front' | 'side' | 'isometric' | 'close';
 
 // Props 인터페이스 정의
 export interface ToneField3DProps {
     // 기본 설정
     tension?: number;
     wireframe?: boolean;
-    cameraView?: 'perspective' | 'top';
+    cameraView?: CameraPreset;
 
     // 타점 데이터
     hitPointLocation?: "internal" | "external" | null;
@@ -28,7 +32,7 @@ export interface ToneField3DProps {
 
     // 콜백 함수
     onTensionChange?: (tension: number) => void;
-    onCameraViewChange?: (view: 'perspective' | 'top') => void;
+    onCameraViewChange?: (view: CameraPreset) => void;
 
     // 스타일
     width?: string | number;
@@ -145,6 +149,28 @@ function getErrorColor(errorValue: number): THREE.Color {
     return color;
 }
 
+/**
+ * 각도 기반 가중치 계산 (원형 연속성 고려)
+ * @param currentAngle - 현재 버텍스의 각도 (라디안)
+ * @param targetAngle - 타겟 영역의 중심 각도 (라디안)
+ * @param transitionRange - 전환 구간 범위 (라디안)
+ * @returns 0~1 범위의 가중치 (1 = 타겟 중심, 0 = 멀리)
+ */
+function angularWeight(currentAngle: number, targetAngle: number, transitionRange: number): number {
+    // 각도 차이 계산 (원형 연속성 고려: 0° = 360°)
+    let diff = Math.abs(currentAngle - targetAngle);
+    if (diff > Math.PI) {
+        diff = 2 * Math.PI - diff;
+    }
+
+    // 정규화 (0 = 타겟 중심, 1 = 전환 범위 끝)
+    const normalized = Math.min(diff / transitionRange, 1);
+
+    // 반전 후 smootherstep 적용 (5차 함수로 더욱 부드러운 전환)
+    const t = 1 - normalized;
+    return t * t * t * (t * (t * 6 - 15) + 10);
+}
+
 function ToneFieldMesh({
     tension,
     wireframe,
@@ -161,93 +187,121 @@ function ToneFieldMesh({
     const meshRef = useRef<THREE.Mesh>(null);
 
     const geometry = useMemo(() => {
-        return createTonefieldGeometry(0.6, 0.85, 64, 32);
+        return createTonefieldGeometry(0.6, 0.85, 256, 32);  // 128 → 256 for smoother edges
     }, []);
 
-    useEffect(() => {
-        if (!meshRef.current) return;
-        const geo = meshRef.current.geometry;
-        const posAttr = geo.attributes.position;
-        const colorAttr = geo.attributes.color;
-        const count = posAttr.count;
-        const color = new THREE.Color();
+    // Custom Shader Material for pixel-perfect color blending
+    const shaderMaterial = useMemo(() => {
+        const colOctave = tuningErrors ? getErrorColor(tuningErrors.octave) : new THREE.Color(0, 1, 0);
+        const colTonic = tuningErrors ? getErrorColor(tuningErrors.tonic) : new THREE.Color(0, 1, 0);
+        const colFifth = tuningErrors ? getErrorColor(tuningErrors.fifth) : new THREE.Color(0, 1, 0);
 
-        // 메쉬 크기 정보
-        const width = 0.6;
-        const height = 0.85;
+        return new THREE.ShaderMaterial({
+            uniforms: {
+                colOctave: { value: colOctave },
+                colTonic: { value: colTonic },
+                colFifth: { value: colFifth },
+                width: { value: 0.6 },
+                height: { value: 0.85 },
+                dimpleRadius: { value: 0.35 },
+                debugMode: { value: 0.0 }  // 0=normal, 1=show weights
+            },
+            vertexShader: `
+                varying vec3 vPosition;
+                varying float vHeight;
 
-        // 조율 오차가 있는 경우, 각 영역별 타겟 색상 미리 계산
-        let colOctave: THREE.Color;
-        let colTonic: THREE.Color;
-        let colFifth: THREE.Color;
+                void main() {
+                    vPosition = position;
+                    vHeight = position.y;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                uniform vec3 colOctave;
+                uniform vec3 colTonic;
+                uniform vec3 colFifth;
+                uniform float width;
+                uniform float height;
+                uniform float dimpleRadius;
+                uniform float debugMode;
 
-        if (tuningErrors) {
-            colOctave = getErrorColor(tuningErrors.octave);
-            colTonic = getErrorColor(tuningErrors.tonic);
-            colFifth = getErrorColor(tuningErrors.fifth);
-        } else {
-            // 기본 색상 (모두 초록색)
-            colOctave = new THREE.Color(0, 1, 0);
-            colTonic = new THREE.Color(0, 1, 0);
-            colFifth = new THREE.Color(0, 1, 0);
-        }
+                varying vec3 vPosition;
+                varying float vHeight;
 
-        for (let i = 0; i < count; i++) {
-            const x = posAttr.getX(i);
-            const y = posAttr.getY(i); // 실제 높이값 (딤플)
-            const z = posAttr.getZ(i); // 평면상 세로축 (Top/Bottom)
+                // Smootherstep (5차 함수)
+                float smootherstep(float t) {
+                    t = clamp(t, 0.0, 1.0);
+                    return t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+                }
 
-            // 정규화된 거리 계산 (딤플 영역 판별용)
-            const r = Math.sqrt(Math.pow(x / (width / 2), 2) + Math.pow(z / (height / 2), 2));
+                // 각도 기반 가중치 (개선된 버전)
+                float angularWeight(float currentAngle, float targetAngle, float transitionRange) {
+                    float diff = abs(currentAngle - targetAngle);
+                    if (diff > 3.14159265) {
+                        diff = 6.28318531 - diff;
+                    }
+                    float normalized = min(diff / transitionRange, 1.0);
+                    // 더 부드러운 전환을 위해 smootherstep 두 번 적용
+                    float t = 1.0 - normalized;
+                    return smootherstep(smootherstep(t));
+                }
 
-            // A. 딤플 영역 (중심부): 기존 금속 재질 색상 유지
-            if (r < 0.35) {
-                // 딤플은 높이(y)에 따라 밝은 회색 계열
-                const brightness = 0.4 + 0.3 * THREE.MathUtils.clamp(y * 10, 0, 1);
-                color.setRGB(brightness, brightness, brightness);
-                colorAttr.setXYZ(i, color.r, color.g, color.b);
-                continue;
-            }
+                void main() {
+                    // 타원 정규화
+                    float nx = vPosition.x / (width / 2.0);
+                    float nz = vPosition.z / (height / 2.0);
+                    float r = sqrt(nx * nx + nz * nz);
 
-            // B. 도넛 영역 (장력 시각화): 가중치 블렌딩
-            // 좌표계: z > 0 = 위쪽 (Octave), z < 0 = 아래쪽 (Tonic), x = 좌우 (Fifth)
+                    // 딤플 영역: 금속 재질
+                    if (r < dimpleRadius) {
+                        float brightness = 0.4 + 0.3 * clamp(vHeight * 10.0, 0.0, 1.0);
+                        gl_FragColor = vec4(vec3(brightness), 1.0);
+                        return;
+                    }
 
-            // 가중치 계산 (부드러운 그라데이션을 위해 절대값 사용)
-            const wOctave = Math.max(z, 0);           // 위쪽 (z > 0)
-            const wTonic = Math.max(-z, 0);           // 아래쪽 (z < 0)
-            const wFifth = Math.abs(x);               // 양 옆
+                    // 각도 계산
+                    float theta = atan(nz, nx);
+                    float transitionRange = 3.14159265;  // 180도
 
-            const totalW = wOctave + wTonic + wFifth;
+                    // 가중치 계산
+                    float wOctave = angularWeight(theta, 1.5707963, transitionRange);  // 90도
+                    float wTonic = angularWeight(theta, -1.5707963, transitionRange);  // 270도
+                    // Fifth: 합산 방식으로 부드러운 전환
+                    float wFifthRight = angularWeight(theta, 0.0, transitionRange);
+                    float wFifthLeft = angularWeight(theta, 3.14159265, transitionRange);
+                    float wFifth = wFifthRight + wFifthLeft;
 
-            // 안전장치: 가중치 합이 0이면 기본 초록색
-            if (totalW <= 0.001) {
-                color.setRGB(0, 1, 0);
-                colorAttr.setXYZ(i, color.r, color.g, color.b);
-                continue;
-            }
+                    float totalW = wOctave + wTonic + wFifth;
 
-            // 색상 블렌딩 (RGB 채널별 가중 평균)
-            const rVal = (colOctave.r * wOctave + colTonic.r * wTonic + colFifth.r * wFifth) / totalW;
-            const gVal = (colOctave.g * wOctave + colTonic.g * wTonic + colFifth.g * wFifth) / totalW;
-            const bVal = (colOctave.b * wOctave + colTonic.b * wTonic + colFifth.b * wFifth) / totalW;
+                    if (totalW <= 0.001) {
+                        gl_FragColor = vec4(0.0, 1.0, 0.0, 1.0);
+                        return;
+                    }
 
-            colorAttr.setXYZ(i, rVal, gVal, bVal);
-        }
+                    // DEBUG MODE: 가중치 시각화
+                    if (debugMode > 0.5) {
+                        // Octave=Red, Tonic=Green, Fifth=Blue
+                        vec3 debugColor = vec3(
+                            wOctave / totalW,
+                            wTonic / totalW,
+                            wFifth / totalW
+                        );
+                        gl_FragColor = vec4(debugColor, 1.0);
+                        return;
+                    }
 
-        colorAttr.needsUpdate = true;
-    }, [tension, geometry, tuningErrors]);
+                    // 색상 블렌딩
+                    vec3 finalColor = (colOctave * wOctave + colTonic * wTonic + colFifth * wFifth) / totalW;
+                    gl_FragColor = vec4(finalColor, 1.0);
+                }
+            `,
+            side: THREE.DoubleSide,
+            wireframe: wireframe
+        });
+    }, [tuningErrors, wireframe]);
 
     return (
-        <mesh ref={meshRef} geometry={geometry}>
-            <meshStandardMaterial
-                vertexColors
-                wireframe={wireframe}
-                side={THREE.DoubleSide}
-                metalness={0.5}
-                roughness={0.2}
-                color={wireframe ? "cyan" : "white"}
-            />
-        </mesh>
+        <mesh ref={meshRef} geometry={geometry} material={shaderMaterial} />
     );
 }
 
@@ -318,7 +372,7 @@ function AnimatedRing({ position }: { position: [number, number, number] }) {
 
     return (
         <mesh ref={ringRef} position={position} rotation={[-Math.PI / 2, 0, 0]}>
-            <ringGeometry args={[0.015, 0.025, 32]} />
+            <ringGeometry args={[0.03, 0.045, 32]} />
             <meshBasicMaterial color="#00ffff" transparent opacity={0.8} side={THREE.DoubleSide} />
         </mesh>
     );
@@ -343,9 +397,10 @@ function HitPointMarker({
 
     return (
         <group>
-            <mesh position={[worldX, worldY, worldZ]}>
-                <sphereGeometry args={[0.01, 16, 16]} />
-                <meshStandardMaterial color="#ff0066" emissive="#ff0066" emissiveIntensity={0.5} />
+            {/* Hit point marker - 30파이 쇠망치 크기 (타원형) */}
+            <mesh position={[worldX, worldY, worldZ]} scale={[1.0, 1.0, 0.3]}>
+                <sphereGeometry args={[0.025, 16, 16]} />
+                <meshStandardMaterial color="#FF0066" emissive="#FF0066" emissiveIntensity={1.0} />
             </mesh>
             <AnimatedRing position={[worldX, worldY, worldZ]} />
             <Html
@@ -398,16 +453,46 @@ function CoordinateGrid() {
     );
 }
 
-function CameraController({ viewMode }: { viewMode: 'perspective' | 'top' }) {
+// 카메라 프리셋 위치 정의
+const CAMERA_PRESETS: Record<CameraPreset, { position: [number, number, number], lookAt?: [number, number, number] }> = {
+    top: {
+        position: [0, 1.5, 0],
+        lookAt: [0, 0, 0]
+    },
+    perspective: {
+        position: [0, 3, 3],
+        lookAt: [0, 0, 0]
+    },
+    front: {
+        position: [0, 0.5, 2],
+        lookAt: [0, 0, 0]
+    },
+    side: {
+        position: [2, 0.5, 0],
+        lookAt: [0, 0, 0]
+    },
+    isometric: {
+        position: [1.5, 1.5, 1.5],
+        lookAt: [0, 0, 0]
+    },
+    close: {
+        position: [0, 0.8, 1.2],
+        lookAt: [0, 0, 0]
+    }
+};
+
+function CameraController({ viewMode }: { viewMode: CameraPreset }) {
     const { camera } = useThree();
 
     useEffect(() => {
-        if (viewMode === 'top') {
-            camera.position.set(0, 1.5, 0);
-            camera.lookAt(0, 0, 0);
-        } else {
-            camera.position.set(0, 3, 3);
-            camera.lookAt(0, 0, 0);
+        const preset = CAMERA_PRESETS[viewMode];
+        if (preset) {
+            camera.position.set(...preset.position);
+            if (preset.lookAt) {
+                camera.lookAt(...preset.lookAt);
+            } else {
+                camera.lookAt(0, 0, 0);
+            }
         }
         camera.updateProjectionMatrix();
     }, [viewMode, camera]);
@@ -418,7 +503,7 @@ function CameraController({ viewMode }: { viewMode: 'perspective' | 'top' }) {
 // 재사용 가능한 ToneField3D 컴포넌트
 export function ToneField3D({
     tension = 0.5,
-    wireframe = true,
+    wireframe = false,
     cameraView = 'top',
     hitPointLocation = null,
     hitPointCoordinate,
@@ -448,7 +533,7 @@ export function ToneField3D({
         onTensionChange?.(newTension);
     };
 
-    const handleCameraViewChange = (newView: 'perspective' | 'top') => {
+    const handleCameraViewChange = (newView: CameraPreset) => {
         setInternalCameraView(newView);
         onCameraViewChange?.(newView);
     };
@@ -466,16 +551,31 @@ export function ToneField3D({
             <Canvas
                 gl={{ alpha: false }}
                 onCreated={({ gl }) => {
-                    gl.setClearColor('#000000', 1);
+                    gl.setClearColor('#000011', 1);
                 }}
             >
                 <PerspectiveCamera makeDefault position={[0, 3, 3]} fov={50} />
                 <OrbitControls target={[0, 0, 0]} />
                 <CameraController viewMode={internalCameraView} />
 
-                <ambientLight intensity={0.4} />
+                {/* 우주 별들 */}
+                <Stars 
+                    radius={100} 
+                    depth={50} 
+                    count={3000} 
+                    factor={4} 
+                    saturation={0.5} 
+                    fade 
+                    speed={0.5}
+                />
+
+                <ambientLight intensity={0.5} />
                 <pointLight position={[10, 10, 10]} intensity={1} />
                 <pointLight position={[-10, 5, -10]} intensity={0.5} color="#ff00ff" />
+                <pointLight position={[0, 15, 0]} intensity={0.3} color="#00aaff" />
+
+                {/* 우주 익룡 - 우주선 옆에 고정 배치 (우주선 위치: [0, 2, 0], 스케일: 0.03) */}
+                <SpacePterosaur position={[0.15, 2, 0]} scale={2.0} speed={0.7} />
 
                 <CoordinateGrid />
                 <TonefieldBoundaries hitPointLocation={hitPointLocation} />

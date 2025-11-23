@@ -24,3 +24,68 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* 사이버펑크 스타일 버튼 - 투명 배경, 네온 외곽선 */
+.cyberpunk-button {
+  position: relative;
+  padding: 12px 24px;
+  background: transparent;
+  border: 2px solid #00ffff;
+  color: #00ffff;
+  font-weight: bold;
+  font-size: 16px;
+  text-transform: uppercase;
+  letter-spacing: 3px;
+  cursor: pointer;
+  overflow: hidden;
+  box-shadow: 
+    0 0 10px #00ffff,
+    0 0 20px #00ffff,
+    0 0 30px rgba(0, 255, 255, 0.5),
+    inset 0 0 10px rgba(0, 255, 255, 0.1);
+  transition: all 0.3s ease;
+  white-space: nowrap;
+  backdrop-filter: blur(5px);
+  text-shadow: 
+    0 0 5px #00ffff,
+    0 0 10px #00ffff;
+}
+
+.cyberpunk-button::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(0, 255, 255, 0.3), transparent);
+  transition: left 0.5s ease;
+}
+
+.cyberpunk-button:hover::before {
+  left: 100%;
+}
+
+.cyberpunk-button:hover {
+  box-shadow: 
+    0 0 15px #00ffff,
+    0 0 30px #00ffff,
+    0 0 45px #00ffff,
+    0 0 60px rgba(0, 255, 255, 0.4),
+    inset 0 0 15px rgba(0, 255, 255, 0.2);
+  transform: scale(1.05);
+  border-color: #00ffff;
+  color: #ffffff;
+  text-shadow: 
+    0 0 10px #00ffff,
+    0 0 20px #00ffff,
+    0 0 30px #00ffff;
+}
+
+.cyberpunk-button:active {
+  transform: scale(0.98);
+  box-shadow: 
+    0 0 5px #00ffff,
+    0 0 10px #00ffff,
+    0 0 15px rgba(0, 255, 255, 0.3);
+}
