@@ -260,19 +260,156 @@ function ToneFieldMesh({
                 continue;
             }
 
-            // B. 도넛 영역 (장력 시각화): 값 믹싱 (Value Mixing) 방식
+            // B. 도넛 영역 (장력 시각화): 타점 적응형 각도 확산 (Target-Adaptive Angular Spread)
             // ToneField.tsx 좌표계: y > 0 = 위쪽 (Octave), y < 0 = 아래쪽 (Tonic), x = 좌우 (Fifth)
 
-            // 가중치 계산 (부드러운 그라데이션을 위해 절대값 사용)
-            const wOctave = Math.max(y, 0);           // 위쪽 (y > 0)
-            const wTonic = Math.max(-y, 0);           // 아래쪽 (y < 0)
-            const wFifth = Math.abs(x);               // 양 옆
+            // 1. 타원형 비율 보정 (Elliptical Aspect Ratio Compensation)
+            // 타원형(0.6 x 0.85)이므로, 각 축의 길이에 맞춰 정규화된 좌표로 각도를 계산해야 함
+            // 이렇게 해야 5도(짧은 축) 영역이 옥타브(긴 축) 영역과 시각적으로 동등한 비율(%)을 차지하게 됨
+            const normX = x / (geometryWidth / 2);  // x / 0.3
+            const normY = y / (geometryHeight / 2); // y / 0.425
+            const angle = Math.atan2(normY, normX);
 
-            const totalW = wOctave + wTonic + wFifth;
+            // Helper: 각도 차이 계산 함수
+            const getAngleDiff = (a1: number, a2: number) => {
+                let diff = Math.abs(a1 - a2);
+                if (diff > Math.PI) diff = 2 * Math.PI - diff;
+            };
 
-            // 안전장치: 가중치 합이 0이면 기본 초록색
+            // 2. 각 영역의 중심축 각도 (Fixed Axes - Physically Correct)
+            // 악기의 물리적 구조에 따라 축은 고정됨 (12시, 6시, 3시, 9시)
+            const axisOctave = Math.PI / 2;   // 12시
+            const axisTonic = -Math.PI / 2;   // 6시
+            const axisFifthR = 0;             // 3시
+            const axisFifthL = Math.PI;       // 9시
+
+            // 3. 확산 계수 (Spread Factor) 계산
+            // [Asymmetric Tension] 비대칭 장력 시각화
+            // 양수(+): 과장력 -> 좁고(Focus) 날카로움
+            // 음수(-): 저장력 -> 넓고(Wide) 부드러움 (1.5배 더 퍼짐)
+            const errorSensitivity = 0.15;
+
+            const getErrorSpread = (error: number) => {
+                const absError = Math.abs(error);
+                let spread = 1.0 / (1.0 + absError * errorSensitivity);
+
+                // 음수 오차일 경우 Spread를 1.5배 넓힘 (헐렁함 표현)
+                if (error < 0) {
+                    spread *= 1.5;
+                }
+
+                // [Minimum Width Clamp] 최소 0.6 보장
+                return Math.max(0.6, spread);
+            };
+
+            const spreadOctave = tuningErrors ? getErrorSpread(tuningErrors.octave) : 1.0;
+            const spreadTonic = tuningErrors ? getErrorSpread(tuningErrors.tonic) : 1.0;
+            const spreadFifth = tuningErrors ? getErrorSpread(tuningErrors.fifth) : 1.0;
+
+            // [Error-Based Compression] 오차 기반 압축 (Sharpening)
+            // 양수(+): Power를 높여서 경계면을 칼같이 만듦 (Hard Edge)
+            // 음수(-): Power를 낮춰서 경계면을 부드럽게 만듦 (Soft Edge)
+            const getSharpenFactor = (error: number) => {
+                const absError = Math.abs(error);
+
+                if (error >= 0) {
+                    // Positive: High Sharpening (Pinpoint)
+                    // 기본 1.0 + 오차 * 0.8 (강하게)
+                    return 1.0 + (absError * 0.8);
+                } else {
+                    // Negative: Low Sharpening (Blurry)
+                    // 기본 1.0 + 오차 * 0.2 (약하게)
+                    return 1.0 + (absError * 0.2);
+                }
+            };
+
+            const sharpOctave = tuningErrors ? getSharpenFactor(tuningErrors.octave) : 1.0;
+            const sharpTonic = tuningErrors ? getSharpenFactor(tuningErrors.tonic) : 1.0;
+            const sharpFifth = tuningErrors ? getSharpenFactor(tuningErrors.fifth) : 1.0;
+
+            // 4. 각도 기반 가중치 계산 (Angular Falloff)
+            // 중심축에서 멀어질수록 가중치가 줄어듦 (Cosine 유사 형태)
+
+            const getAngularWeight = (currentAngle: number, axisAngle: number, spread: number, sharpen: number) => {
+                let diff = Math.abs(currentAngle - axisAngle);
+                if (diff > Math.PI) diff = 2 * Math.PI - diff;
+
+                // 유효 각도 범위 설정 (기본 40도 * Spread)
+                const maxAngle = (Math.PI / 4.5) * spread;
+
+                if (diff > maxAngle) return 0;
+
+                // 0(중심) -> 1.0, maxAngle(끝) -> 0.0 으로 부드럽게 감소
+                const baseWeight = Math.cos((diff / maxAngle) * (Math.PI / 2));
+
+                // [Sharpening] 오차가 클수록 가중치를 제곱하여 더 급격하게 떨어뜨림
+                return Math.pow(baseWeight, sharpen);
+            };
+
+            let wOctave = getAngularWeight(angle, axisOctave, spreadOctave, sharpOctave);
+            let wTonic = getAngularWeight(angle, axisTonic, spreadTonic, sharpTonic);
+            // 5도는 좌우 양쪽 축 모두 고려
+            let wFifth = Math.max(
+                getAngularWeight(angle, axisFifthR, spreadFifth, sharpFifth),
+                getAngularWeight(angle, axisFifthL, spreadFifth, sharpFifth)
+            );
+
+            // [Anti-Bleed] 침범 방지 (Dominance Logic)
+            // 상/하단(Octave/Tonic)이 강하면 측면(Fifth)의 영향력을 줄임
+            // 얼룩말 무늬 방지하되, 5도 영역이 아예 사라지지 않도록 완화
+            const dominance = Math.max(wOctave, wTonic);
+            if (dominance > 0.7) { // 임계값을 0.5 -> 0.7로 높임 (더 관대하게)
+                // dominance가 0.7 ~ 1.0일 때 wFifth를 줄임
+                wFifth *= (1.0 - dominance) * 3.0; // 감쇠 강도 조절
+                wFifth = Math.max(0, wFifth);
+            }
+
+            // [Normalize Weights] 가중치 정규화 (빈 공간 채우기)
+            // 합이 1.0이 되도록 조정하여 검은 구멍(Gap) 제거
+            let totalW = wOctave + wTonic + wFifth;
+
+            if (totalW > 0.001) {
+                wOctave /= totalW;
+                wTonic /= totalW;
+                wFifth /= totalW;
+                totalW = 1.0; // 정규화 후 totalW는 1.0으로 간주
+            }
+
+            // 안전장치: 가중치 합이 0이면(Gap 발생 시), 가장 가까운 영역의 색상을 사용 (Nearest Neighbor)
+            // 이를 통해 검은색 구멍이 생기는 것을 방지하고 항상 유효한 오차 색상을 보여줌
             if (totalW <= 0.001) {
-                color.setRGB(0, 1, 0);
+                // 각 영역까지의 거리 계산
+                const dOctave = getAngleDiff(angle, axisOctave);
+                const dTonic = getAngleDiff(angle, axisTonic);
+                const dFifth = Math.min(getAngleDiff(angle, axisFifthR), getAngleDiff(angle, axisFifthL));
+
+                let fallbackError = 0;
+                if (dOctave <= dTonic && dOctave <= dFifth) {
+                    fallbackError = tuningErrors ? tuningErrors.octave : 0;
+                } else if (dTonic <= dOctave && dTonic <= dFifth) {
+                    fallbackError = tuningErrors ? tuningErrors.tonic : 0;
+                } else {
+                    fallbackError = tuningErrors ? tuningErrors.fifth : 0;
+                }
+
+                const { color: fbColor, brightness: fbBrightness } = getErrorColor(fallbackError);
+
+                // 스포트라이트 적용 (비활성화)
+                let finalBrightness = fbBrightness;
+                // if (hasTarget) {
+                //     const dist = Math.sqrt((x - targetX) ** 2 + (y - targetY) ** 2);
+                //     const maxDist = 1.0;
+                //     const spotlightFactor = Math.max(0, 1.0 - (dist / maxDist));
+                //     // Falloff curve
+                //     const falloff = Math.pow(spotlightFactor, 1.5);
+
+                //     // Highlight logic
+                //     const highlight = Math.pow(Math.max(0, 1.0 - (dist / 0.3)), 3) * 0.5;
+
+                //     finalBrightness = (fbBrightness * 0.3) + (fbBrightness * falloff * 1.2) + highlight;
+                // }
+
+                color.copy(fbColor).multiplyScalar(finalBrightness);
                 colorAttr.setXYZ(i, color.r, color.g, color.b);
                 continue;
             }
@@ -289,33 +426,33 @@ function ToneFieldMesh({
             // (+값과 -값이 만나서 0에 가까워지면 자동으로 초록색이 됨)
             const { color: baseColor, brightness } = getErrorColor(mixedError);
 
-            // 3. 스포트라이트 효과 적용 (Spotlight Effect)
+            // 3. 스포트라이트 효과 적용 (Spotlight Effect) - 비활성화
             // 영역(Zone)은 고정하고, 타점 주변만 밝게 강조
             let finalBrightness = brightness;
 
-            if (hasTarget) {
-                // 타점과 현재 버텍스 사이의 거리 계산
-                // 정규화된 좌표계 사용 (x: -0.3~0.3, y: -0.425~0.425)
-                const dx = x - targetX;
-                const dy = y - targetY;
-                const distance = Math.sqrt(dx * dx + dy * dy);
+            // if (hasTarget) {
+            //     // 타점과 현재 버텍스 사이의 거리 계산
+            //     // 정규화된 좌표계 사용 (x: -0.3~0.3, y: -0.425~0.425)
+            //     const dx = x - targetX;
+            //     const dy = y - targetY;
+            //     const distance = Math.sqrt(dx * dx + dy * dy);
 
-                // 거리 기반 감쇠 (Distance Attenuation) - 더 극적인 효과를 위해 조정
-                // [사용자 조절 가이드]
-                // 1. maxBrightness: 타점 중심의 최대 밝기 (현재 2.0 = 200%)
-                // 2. minBrightness: 타점 반대편의 최소 밝기 (현재 0.1 = 10%)
-                // 3. falloffFactor: 밝기가 어두워지는 속도 (클수록 급격히 어두워짐, 현재 3.0)
+            //     // 거리 기반 감쇠 (Distance Attenuation) - 더 극적인 효과를 위해 조정
+            //     // [사용자 조절 가이드]
+            //     // 1. maxBrightness: 타점 중심의 최대 밝기 (현재 2.0 = 200%)
+            //     // 2. minBrightness: 타점 반대편의 최소 밝기 (현재 0.1 = 10%)
+            //     // 3. falloffFactor: 밝기가 어두워지는 속도 (클수록 급격히 어두워짐, 현재 3.0)
 
-                const maxBrightness = 2.0;
-                const minBrightness = 0.1;
-                const falloffFactor = 3.0;
+            //     const maxBrightness = 2.0;
+            //     const minBrightness = 0.1;
+            //     const falloffFactor = 3.0;
 
-                // distance 0 -> factor = maxBrightness (2.0)
-                // distance가 커질수록 급격히 감소하여 minBrightness (0.1)로 수렴
-                const spotlightFactor = Math.max(minBrightness, maxBrightness - distance * falloffFactor);
+            //     // distance 0 -> factor = maxBrightness (2.0)
+            //     // distance가 커질수록 급격히 감소하여 minBrightness (0.1)로 수렴
+            //     const spotlightFactor = Math.max(minBrightness, maxBrightness - distance * falloffFactor);
 
-                finalBrightness = brightness * spotlightFactor;
-            }
+            //     finalBrightness = brightness * spotlightFactor;
+            // }
 
             // 밝기 적용 (색상 * 최종 밝기)
             color.copy(baseColor).multiplyScalar(finalBrightness);
@@ -731,7 +868,7 @@ function CoordinateGrid() {
                     position={[-0.5, -0.6, 0.02]}
                     fontSize={0.04}
                     color="#808080"
-                    opacity={0.3}
+                    fillOpacity={0.3}
                     anchorX="center"
                     anchorY="middle"
                 >
@@ -741,7 +878,7 @@ function CoordinateGrid() {
                     position={[0, -0.6, 0.02]}
                     fontSize={0.04}
                     color="#808080"
-                    opacity={0.3}
+                    fillOpacity={0.3}
                     anchorX="center"
                     anchorY="middle"
                 >
@@ -751,7 +888,7 @@ function CoordinateGrid() {
                     position={[0.5, -0.6, 0.02]}
                     fontSize={0.04}
                     color="#808080"
-                    opacity={0.3}
+                    fillOpacity={0.3}
                     anchorX="center"
                     anchorY="middle"
                 >
@@ -760,31 +897,31 @@ function CoordinateGrid() {
 
                 {/* Y-axis labels (left side) */}
                 <Text
-                    position={[-0.6, -0.5, 0.02]}
+                    position={[0.6, -0.425, 0.02]}
                     fontSize={0.04}
                     color="#808080"
-                    opacity={0.3}
-                    anchorX="center"
+                    fillOpacity={0.3}
+                    anchorX="left"
                     anchorY="middle"
                 >
                     -1
                 </Text>
                 <Text
-                    position={[-0.6, 0, 0.02]}
+                    position={[0.6, 0, 0.02]}
                     fontSize={0.04}
                     color="#808080"
-                    opacity={0.3}
-                    anchorX="center"
+                    fillOpacity={0.3}
+                    anchorX="left"
                     anchorY="middle"
                 >
                     0
                 </Text>
                 <Text
-                    position={[-0.6, 0.5, 0.02]}
+                    position={[0.6, 0.425, 0.02]}
                     fontSize={0.04}
                     color="#808080"
-                    opacity={0.3}
-                    anchorX="center"
+                    fillOpacity={0.3}
+                    anchorX="left"
                     anchorY="middle"
                 >
                     1
