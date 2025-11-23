@@ -92,35 +92,68 @@ function createTonefieldGeometry(width: number, height: number, radialSegments: 
     return geometry;
 }
 
-/**
- * 오차값을 색상으로 변환하는 유틸리티 함수
- * @param errorValue - 조율 오차 (Hz 단위)
- * @returns THREE.Color 객체
- */
-function getErrorColor(errorValue: number): THREE.Color {
-    const color = new THREE.Color();
+// Helper function to get color based on error value
+// Returns both color and brightness intensity
+function getErrorColor(errorValue: number): { color: THREE.Color, brightness: number } {
     const absError = Math.abs(errorValue);
+    const color = new THREE.Color();
 
-    // 허용 오차 범위 설정 (0~30Hz 범위로 정규화)
-    const maxError = 30.0;
-    const normalizedError = Math.min(absError / maxError, 1.0);
+    // Base Colors
+    const safeColor = new THREE.Color(0, 1, 0); // Green
+    const errorBaseColor = (errorValue > 0)
+        ? new THREE.Color(1, 0, 0) // Red (+)
+        : new THREE.Color(0, 0, 1); // Blue (-)
 
-    if (absError < 0.1) {
-        // 오차가 거의 없음: 초록색 (조율 완료)
-        color.setRGB(0, 1, 0);
-    } else if (errorValue > 0) {
-        // 과장력 (Over-tension): 빨간색 (밝기만 조절)
-        // normalizedError가 0에 가까우면 어두운 빨강, 1에 가까우면 밝은 빨강
-        const brightness = 0.3 + 0.7 * normalizedError; // 0.3 ~ 1.0
-        color.setRGB(brightness, 0, 0);
-    } else {
-        // 저장력 (Under-tension): 파란색 (밝기만 조절)
-        // normalizedError가 0에 가까우면 어두운 파랑, 1에 가까우면 밝은 파랑
-        const brightness = 0.3 + 0.7 * normalizedError; // 0.3 ~ 1.0
-        color.setRGB(0, 0, brightness);
+    // 1. Perfect Zone (0 ~ 1 Hz): 밝은 초록색
+    if (absError <= 1.0) {
+        return { color: safeColor, brightness: 1.0 };
     }
 
-    return color;
+    // 2. Transition Zone 1 (1 ~ 3 Hz): 중간 초록 + 낮은 에러색
+    // 초록색이 지배적이지만 에러색이 섞이기 시작함
+    if (absError <= 3.0) {
+        const t = (absError - 1.0) / 2.0; // 0.0 ~ 1.0
+
+        // Green: 1.0 -> 0.6 (중간 채도)
+        // Error: 0.0 -> 0.4 (낮은 채도)
+        const greenComp = 1.0 - (0.4 * t);
+        const errorComp = 0.4 * t;
+
+        color.copy(safeColor).multiplyScalar(greenComp).add(errorBaseColor.clone().multiplyScalar(errorComp));
+
+        // 밝기는 유지하되 색상이 섞임
+        return { color: color, brightness: 1.0 };
+    }
+
+    // 3. Transition Zone 2 (3 ~ 5 Hz): 낮은 초록 + 중간 에러색
+    // 에러색이 지배적이 되고 초록색은 사라져감
+    if (absError <= 5.0) {
+        const t = (absError - 3.0) / 2.0; // 0.0 ~ 1.0
+
+        // Green: 0.6 -> 0.0 (사라짐)
+        const greenComp = 0.6 * (1.0 - t);
+
+        // Error: 0.4 -> 0.7 (중간 채도 이상으로 증가)
+        const errorComp = 0.4 + (0.3 * t);
+
+        color.copy(safeColor).multiplyScalar(greenComp).add(errorBaseColor.clone().multiplyScalar(errorComp));
+
+        // 5Hz에서 순수 에러색 구간으로 자연스럽게 넘어가기 위해 밝기 조정 없음 (Components 자체가 밝기 역할)
+        return { color: color, brightness: 1.0 };
+    }
+
+    // 4. Tension Zone (5 ~ 30 Hz): 순수 에러색 + 밝기/투명도 조절
+    // 초록색 없이 오직 에러색의 강도로만 표현
+    const maxError = 30.0;
+    const clampedError = Math.min(absError, maxError);
+    const t = (clampedError - 5.0) / (maxError - 5.0); // 0.0 ~ 1.0
+
+    // 밝기: 0.7 -> 1.0 (5Hz에서 70% 밝기로 시작하여 30Hz에서 100%)
+    // 이전 구간 끝(Error 0.7)과 자연스럽게 연결됨
+    const brightness = 0.7 + (0.3 * t);
+
+    color.copy(errorBaseColor);
+    return { color: color, brightness: brightness };
 }
 
 function ToneFieldMesh({
@@ -142,10 +175,6 @@ function ToneFieldMesh({
 }) {
 
     // Parameters for the ellipse
-    const width = 10; // Major axis
-    const height = 14; // Minor axis (rotated 90 deg? Image shows vertical ellipse)
-    // Actually image shows vertical ellipse. Let's say Width < Height.
-
     const geometry = useMemo(() => {
         // Create ellipse with 0.6 (X-axis) x 0.85 (Z-axis) dimensions
         // This creates the tonefield with the longer axis along Z
@@ -190,29 +219,6 @@ function ToneFieldMesh({
         // 🔍 디버깅: tuningErrors 값 로그
         console.log('🎨 ToneFieldMesh - tuningErrors:', tuningErrors);
 
-        // 조율 오차가 있는 경우, 각 영역별 타겟 색상 미리 계산
-        let colOctave: THREE.Color;
-        let colTonic: THREE.Color;
-        let colFifth: THREE.Color;
-
-        if (tuningErrors) {
-            colOctave = getErrorColor(tuningErrors.octave);
-            colTonic = getErrorColor(tuningErrors.tonic);
-            colFifth = getErrorColor(tuningErrors.fifth);
-
-            // 🔍 디버깅: 계산된 색상 로그
-            console.log('🎨 색상 계산 결과:');
-            console.log('  - Octave (위쪽):', tuningErrors.octave, 'Hz →', `rgb(${Math.round(colOctave.r * 255)}, ${Math.round(colOctave.g * 255)}, ${Math.round(colOctave.b * 255)})`);
-            console.log('  - Tonic (아래쪽):', tuningErrors.tonic, 'Hz →', `rgb(${Math.round(colTonic.r * 255)}, ${Math.round(colTonic.g * 255)}, ${Math.round(colTonic.b * 255)})`);
-            console.log('  - Fifth (좌우):', tuningErrors.fifth, 'Hz →', `rgb(${Math.round(colFifth.r * 255)}, ${Math.round(colFifth.g * 255)}, ${Math.round(colFifth.b * 255)})`);
-        } else {
-            // 기본 색상 (모두 초록색)
-            colOctave = new THREE.Color(0, 1, 0);
-            colTonic = new THREE.Color(0, 1, 0);
-            colFifth = new THREE.Color(0, 1, 0);
-            console.log('🎨 tuningErrors가 없음 - 기본 초록색 사용');
-        }
-
         for (let i = 0; i < count; i++) {
             const x = posAttr.getX(i);
             const y = posAttr.getY(i); // Y축이 평면상 세로축
@@ -231,7 +237,7 @@ function ToneFieldMesh({
                 continue;
             }
 
-            // B. 도넛 영역 (장력 시각화): 가중치 블렌딩
+            // B. 도넛 영역 (장력 시각화): 값 믹싱 (Value Mixing) 방식
             // ToneField.tsx 좌표계: y > 0 = 위쪽 (Octave), y < 0 = 아래쪽 (Tonic), x = 좌우 (Fifth)
 
             // 가중치 계산 (부드러운 그라데이션을 위해 절대값 사용)
@@ -248,16 +254,26 @@ function ToneFieldMesh({
                 continue;
             }
 
-            // 색상 블렌딩 (RGB 채널별 가중 평균)
-            const rVal = (colOctave.r * wOctave + colTonic.r * wTonic + colFifth.r * wFifth) / totalW;
-            const gVal = (colOctave.g * wOctave + colTonic.g * wTonic + colFifth.g * wFifth) / totalW;
-            const bVal = (colOctave.b * wOctave + colTonic.b * wTonic + colFifth.b * wFifth) / totalW;
+            // 1. 오차 값(Value) 자체를 먼저 믹싱
+            let mixedError = 0;
+            if (tuningErrors) {
+                mixedError = (tuningErrors.octave * wOctave +
+                    tuningErrors.tonic * wTonic +
+                    tuningErrors.fifth * wFifth) / totalW;
+            }
 
-            colorAttr.setXYZ(i, rVal, gVal, bVal);
+            // 2. 섞인 최종 값을 색상으로 변환
+            // (+값과 -값이 만나서 0에 가까워지면 자동으로 초록색이 됨)
+            const { color: baseColor, brightness } = getErrorColor(mixedError);
+
+            // 밝기 적용 (색상 * 밝기)
+            color.copy(baseColor).multiplyScalar(brightness);
+
+            colorAttr.setXYZ(i, color.r, color.g, color.b);
 
             // 🔍 디버깅: 일부 버텍스 색상 샘플링
             if (i % 200 === 0) {
-                console.log(`  버텍스 ${i}: pos(${x.toFixed(2)}, ${y.toFixed(2)}, ${z.toFixed(2)}) 가중치(Oct:${wOctave.toFixed(2)}, Ton:${wTonic.toFixed(2)}, Fif:${wFifth.toFixed(2)}) → rgb(${Math.round(rVal * 255)}, ${Math.round(gVal * 255)}, ${Math.round(bVal * 255)})`);
+                console.log(`  버텍스 ${i}: MixedError:${mixedError.toFixed(2)}Hz Brightness:${brightness.toFixed(2)}`);
             }
         }
 
@@ -354,8 +370,8 @@ function DoubleClickHandler({
 
 // Component for tonefield boundary lines
 function TonefieldBoundaries({ hitPointLocation }: { hitPointLocation: "internal" | "external" | null }) {
-    // 모든 경우에 투명도 80% 회색 사용
-    const color = 0x808080; // Gray
+    // 모든 경우에 투명도 80% 흰색 사용
+    const color = 0xffffff; // White
     const opacity = 0.8;
 
     const outerLine = useMemo(() => {
@@ -487,22 +503,28 @@ function TonefieldBoundaries({ hitPointLocation }: { hitPointLocation: "internal
     );
 }
 
+
+
 // Component for location text in dimple center
 function LocationText({ hitPointLocation }: { hitPointLocation: "internal" | "external" | null }) {
     if (!hitPointLocation) return null;
 
-    // 딤플 중앙 위치 (약간 위로 올려서 표시)
+    // 딤플 중앙 위치 (메쉬 위로 확실하게 띄움)
     // 외부일 때는 딤플이 반전되므로 z 위치도 조정
-    const dimpleCenterZ = hitPointLocation === "external" ? -0.05 : 0.05;
+    const dimpleCenterZ = hitPointLocation === "external" ? -0.2 : 0.2;
 
     return (
         <Html
             position={[0, 0, dimpleCenterZ]}
             center
             zIndexRange={[100, 0]}
-            style={{ pointerEvents: 'none' }}
+            style={{
+                pointerEvents: 'none',
+                whiteSpace: 'nowrap',
+                userSelect: 'none'
+            }}
         >
-            <div className="text-gray-400/40 text-2xl font-bold drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] whitespace-nowrap">
+            <div className="text-white text-2xl font-bold drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">
                 {hitPointLocation === "internal" ? "내부" : "외부"}
             </div>
         </Html>
@@ -511,29 +533,54 @@ function LocationText({ hitPointLocation }: { hitPointLocation: "internal" | "ex
 
 // Component for animated ring around hit point
 function AnimatedRing({ position, color }: { position: [number, number, number]; color: string }) {
-    const ringRef = useRef<THREE.Mesh>(null);
+    const innerRingRef = useRef<THREE.Mesh>(null);
+    const outerRingRef = useRef<THREE.Mesh>(null);
 
     useFrame((state) => {
-        if (!ringRef.current) return;
+        const time = state.clock.elapsedTime;
 
-        // Pulsing scale animation
-        const scale = 1 + 0.15 * Math.sin(state.clock.elapsedTime * 3);
-        ringRef.current.scale.setScalar(scale);
+        // Inner ring animation
+        if (innerRingRef.current) {
+            const innerScale = 1 + 0.4 * Math.sin(time * 4);
+            innerRingRef.current.scale.setScalar(innerScale);
+            innerRingRef.current.rotation.z = time * 3;
+            const innerMaterial = innerRingRef.current.material as THREE.MeshBasicMaterial;
+            innerMaterial.opacity = 0.8 + 0.2 * Math.sin(time * 4);
+        }
 
-        // Rotation animation
-        ringRef.current.rotation.z = state.clock.elapsedTime * 2;
-
-        // Pulsing opacity
-        const material = ringRef.current.material as THREE.MeshBasicMaterial;
-        material.opacity = 0.5 + 0.3 * Math.sin(state.clock.elapsedTime * 3);
+        // Outer ring animation (반대 위상으로 펄싱)
+        if (outerRingRef.current) {
+            const outerScale = 1 + 0.3 * Math.sin(time * 4 + Math.PI);
+            outerRingRef.current.scale.setScalar(outerScale);
+            outerRingRef.current.rotation.z = -time * 2;
+            const outerMaterial = outerRingRef.current.material as THREE.MeshBasicMaterial;
+            outerMaterial.opacity = 0.6 + 0.4 * Math.sin(time * 4 + Math.PI);
+        }
     });
 
     return (
-        <mesh ref={ringRef} position={position}>
-            {/* Reduced size by 50% - Already in XY plane */}
-            <ringGeometry args={[0.015, 0.025, 32]} />
-            <meshBasicMaterial color={color} transparent opacity={0.8} side={THREE.DoubleSide} />
-        </mesh>
+        <group position={position}>
+            {/* Inner ring - 더 큰 고리 크기 */}
+            <mesh ref={innerRingRef}>
+                <ringGeometry args={[0.025, 0.04, 32]} />
+                <meshBasicMaterial
+                    color={color}
+                    transparent
+                    opacity={1.0}
+                    side={THREE.DoubleSide}
+                />
+            </mesh>
+            {/* Outer ring - 더 큰 외곽 고리 */}
+            <mesh ref={outerRingRef}>
+                <ringGeometry args={[0.045, 0.06, 32]} />
+                <meshBasicMaterial
+                    color={color}
+                    transparent
+                    opacity={1.0}
+                    side={THREE.DoubleSide}
+                />
+            </mesh>
+        </group>
     );
 }
 
