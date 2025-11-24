@@ -9,22 +9,23 @@ interface Spline3DSceneProps {
     className?: string;
 }
 
-export default function Spline3DScene({ 
-    sceneUrl, 
-    width = '100%', 
+export default function Spline3DScene({
+    sceneUrl,
+    width = '100%',
     height = '500px',
-    className = ''
-}: Spline3DSceneProps) {
+    className = '',
+    onLoad
+}: Spline3DSceneProps & { onLoad?: (spline: any) => void }) {
     return (
-        <div 
-            style={{ 
-                width, 
-                height, 
-                position: 'relative' 
-            }} 
+        <div
+            style={{
+                width,
+                height,
+                position: 'relative'
+            }}
             className={className}
         >
-            <Spline scene={sceneUrl} />
+            <Spline scene={sceneUrl} onLoad={onLoad} />
         </div>
     );
 }

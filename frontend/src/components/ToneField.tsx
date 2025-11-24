@@ -2296,8 +2296,8 @@ export function ToneField() {
         setHitPointCount("");
         setHammeringType("");
 
-        // Camera view - 6번째 시점(close)으로 리셋
-        setCameraView('close');
+        // Camera view - 1번째 시점(top)으로 리셋
+        setCameraView('top');
 
         // OrbitControls 리셋 (카메라 시점 초기화)
         if (orbitControlsRef.current) {
