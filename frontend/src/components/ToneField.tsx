@@ -3005,7 +3005,7 @@ export function ToneField() {
                         gl.setClearColor('#000000', 1);
                     }}
                 >
-                    <PerspectiveCamera makeDefault position={[2, 2, 2]} fov={50} />
+                    <PerspectiveCamera makeDefault position={[0, 0, 1.5]} fov={50} />
                     {/* 게임 모드 및 나룻배 모드일 때는 OrbitControls 비활성화 */}
                     {!inSpaceGameMode && !inFerryBoatMode && <OrbitControls ref={orbitControlsRef} target={[0, 0, 0]} />}
                     {!inSpaceGameMode && !inFerryBoatMode && <CameraController viewMode={cameraView} />}

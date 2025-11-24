@@ -16,7 +16,7 @@ class SpaceshipPhysics {
     maxSpeed: number = 100.0;       // 최고 속도 제한
     turnSpeed: number = 2.0;       // 회전 속도
     friction: number = 2.0;        // 마찰력 (높을수록 금방 멈춤, 0이면 영원히 미끄러짐)
-    
+
     // 물리 상태 변수
     velocity: { x: number; y: number; z: number } = { x: 0, y: 0, z: 0 }; // 현재 속도 벡터
     speed: number = 0; // 현재 속력 스칼라
@@ -45,7 +45,7 @@ class SpaceshipPhysics {
         // Three.js에서 Z축은 앞쪽이 음수 방향이므로 -Math.cos 사용
         const directionX = Math.sin(object3D.rotation.y);
         const directionZ = -Math.cos(object3D.rotation.y);
-        
+
         // 좌우 방향 벡터 계산 (전방 벡터를 90도 회전)
         const leftX = -Math.cos(object3D.rotation.y);
         const leftZ = -Math.sin(object3D.rotation.y);
@@ -74,13 +74,13 @@ class SpaceshipPhysics {
         const dampingFactor = 1.0 - (this.friction * dt);
         // dampingFactor가 0보다 작아지면 역주행하므로 0~1 사이 유지
         const safeDamping = Math.max(0.0, Math.min(1.0, dampingFactor));
-        
+
         this.velocity.x *= safeDamping;
         this.velocity.z *= safeDamping;
 
         // 4. 속도 제한 (Max Speed Clamping)
         // 피타고라스 정리로 현재 속력 계산
-        const currentSpeed = Math.sqrt(this.velocity.x**2 + this.velocity.z**2);
+        const currentSpeed = Math.sqrt(this.velocity.x ** 2 + this.velocity.z ** 2);
         if (currentSpeed > this.maxSpeed) {
             const ratio = this.maxSpeed / currentSpeed;
             this.velocity.x *= ratio;
@@ -93,7 +93,7 @@ class SpaceshipPhysics {
         // 5. 최종 위치 적용 (위치 = 위치 + 속도 * 시간)
         object3D.position.x += this.velocity.x * dt;
         object3D.position.z += this.velocity.z * dt;
-        
+
         // (선택사항) 비행 효과를 위한 틸트(기울기) 효과
         // 회전할 때 기체가 살짝 기울어지면 더 리얼함
         if (input.left) object3D.rotation.z = 0.2;
@@ -126,15 +126,15 @@ export function Player({ initialPosition = [0, 0, -0.05], onPositionChange, onRo
     const [moveLeft, setMoveLeft] = useState(false);
     const [moveRight, setMoveRight] = useState(false);
     const [isBoosting, setIsBoosting] = useState(false); // 부스터 상태
-    
+
     // 카메라 시점 타입 정의 (1인칭과 3인칭 뒤에서만)
     type CameraView = 'firstPerson' | 'thirdPersonBack';
     const [cameraView, setCameraView] = useState<CameraView>('firstPerson'); // 카메라 시점 상태
-    
+
     // 마우스 회전을 위한 상태
     const euler = useRef(new THREE.Euler(0, 0, 0, 'YXZ'));
     const PI_2 = Math.PI / 2;
-    
+
     // 우주선 위치 추적 (카메라 시점 계산용)
     const spaceshipPositionRef = useRef<THREE.Vector3>(new THREE.Vector3(...initialPosition));
     const spaceshipRotationRef = useRef<THREE.Euler>(new THREE.Euler(0, 0, 0, 'YXZ'));
@@ -142,19 +142,19 @@ export function Player({ initialPosition = [0, 0, -0.05], onPositionChange, onRo
     // Physics state
     const velocity = useRef(new THREE.Vector3());
     const isJumping = useRef(false);
-    
+
     // 우주선 물리 엔진 인스턴스
     const spaceshipPhysics = useRef<SpaceshipPhysics | null>(null);
-    
+
     // 우주선 물리 엔진 초기화
     useEffect(() => {
         if (isSpaceshipMode && !spaceshipPhysics.current) {
             spaceshipPhysics.current = new SpaceshipPhysics();
-            // Three.js 환경에 맞게 속도 조정 (더 느리게 설정)
-            spaceshipPhysics.current.acceleration = 5.0;  // 가속력 조정
-            spaceshipPhysics.current.maxSpeed = 10.0;    // 최고 속도 조정
-            spaceshipPhysics.current.turnSpeed = 1.5;    // 회전 속도 조정
-            spaceshipPhysics.current.friction = 1.5;     // 마찰력 조정
+            // Three.js 환경에 맞게 속도 조정 (광활한 우주 유영을 위해 매우 느리게 설정)
+            spaceshipPhysics.current.acceleration = 0.5;  // 가속력 대폭 감소 (5.0 -> 0.5)
+            spaceshipPhysics.current.maxSpeed = 2.0;      // 최고 속도 대폭 감소 (10.0 -> 2.0)
+            spaceshipPhysics.current.turnSpeed = 0.8;     // 회전 속도 감소 (1.5 -> 0.8)
+            spaceshipPhysics.current.friction = 0.8;      // 마찰력 감소 (1.5 -> 0.8) - 더 길게 미끄러짐
         }
     }, [isSpaceshipMode]);
 
@@ -206,17 +206,18 @@ export function Player({ initialPosition = [0, 0, -0.05], onPositionChange, onRo
                 camera.position.set(...initialPosition);
                 lastPositionRef.current = [...initialPosition] as [number, number, number];
             }
-            
+
             // 플레이어 모델 위치 초기화
             playerModelPosition.current.set(...initialPosition);
-            
+
             // 우주선 위치 및 회전 초기화
             spaceshipPositionRef.current.set(...initialPosition);
-            spaceshipRotationRef.current.set(0, 0, 0, 'YXZ');
+            // 180도 회전하여 +Z 방향을 바라보도록 설정
+            spaceshipRotationRef.current.set(0, Math.PI, 0, 'YXZ');
 
-            // 카메라가 앞쪽을 바라보도록 설정 (1인칭 시점)
-            camera.rotation.set(0, 0, 0);
-            euler.current.set(0, 0, 0, 'YXZ');
+            // 카메라가 앞쪽(+Z)을 바라보도록 설정 (1인칭 시점)
+            camera.rotation.set(0, Math.PI, 0);
+            euler.current.set(0, Math.PI, 0, 'YXZ');
 
             // 중력 시스템 초기화
             velocity.current.set(0, 0, 0);
@@ -252,7 +253,7 @@ export function Player({ initialPosition = [0, 0, -0.05], onPositionChange, onRo
     // 카메라 시점 변경 함수 (1인칭 ↔ 3인칭 뒤에서만)
     const changeCameraView = () => {
         if (!isSpaceshipMode) return;
-        
+
         setCameraView((prev) => {
             let next: CameraView;
             switch (prev) {
@@ -344,7 +345,7 @@ export function Player({ initialPosition = [0, 0, -0.05], onPositionChange, onRo
             document.removeEventListener('keyup', handleKeyUp);
         };
     }, [isSpaceshipMode]);
-    
+
     // 카메라 시점 변경 시 초기 안내 문구 출력
     useEffect(() => {
         if (isSpaceshipMode && hasInitialized.current) {
@@ -439,7 +440,7 @@ export function Player({ initialPosition = [0, 0, -0.05], onPositionChange, onRo
             document.removeEventListener('pointerlockchange', handlePointerLockChange);
             document.removeEventListener('pointerlockerror', handlePointerLockError);
             document.removeEventListener('keydown', handleKeyDown);
-            
+
             // 컴포넌트 언마운트 시 pointer lock 해제
             if (document.pointerLockElement === canvas && isElementInDOM(canvas)) {
                 try {
@@ -455,14 +456,14 @@ export function Player({ initialPosition = [0, 0, -0.05], onPositionChange, onRo
     useFrame((state, delta) => {
         if (isSpaceshipMode && spaceshipPhysics.current) {
             // 우주선 모드: 물리 기반 비행 시스템
-            
+
             // 물리 엔진을 위한 가상 우주선 객체 생성
             // (실제로는 spaceshipPositionRef와 spaceshipRotationRef를 사용)
             const spaceshipObject = {
                 position: spaceshipPositionRef.current,
                 rotation: spaceshipRotationRef.current
             };
-            
+
             // 입력 상태를 물리 엔진 형식으로 변환
             const input = {
                 forward: moveForward,
@@ -470,17 +471,17 @@ export function Player({ initialPosition = [0, 0, -0.05], onPositionChange, onRo
                 left: moveLeft,
                 right: moveRight
             };
-            
+
             // 1인칭 시점에서는 카메라 회전을 우주선 회전과 동기화
             if (cameraView === 'firstPerson') {
                 const euler = new THREE.Euler(0, 0, 0, 'YXZ');
                 euler.setFromQuaternion(camera.quaternion);
                 spaceshipRotationRef.current.y = euler.y; // Y축 회전만 동기화
             }
-            
+
             // 물리 엔진 업데이트 (관성과 드리프트 효과 포함)
             spaceshipPhysics.current.update(input, delta, spaceshipObject);
-            
+
             // 1인칭 시점: 카메라 위치를 우주선 위치와 동기화
             if (cameraView === 'firstPerson') {
                 camera.position.copy(spaceshipPositionRef.current);
@@ -491,15 +492,15 @@ export function Player({ initialPosition = [0, 0, -0.05], onPositionChange, onRo
                 euler.copy(spaceshipRotationRef.current);
                 const quaternion = new THREE.Quaternion().setFromEuler(euler);
                 offset.applyQuaternion(quaternion);
-                
+
                 const targetPosition = spaceshipPositionRef.current.clone().add(offset);
                 camera.position.lerp(targetPosition, 0.1); // 부드러운 이동
-                
+
                 // 우주선을 바라보도록 회전
                 const lookAtPosition = spaceshipPositionRef.current.clone();
                 camera.lookAt(lookAtPosition);
             }
-            
+
             // 속도 콜백 전달 (물리 엔진의 속도를 km/h로 변환)
             if (onVelocityChangeRef.current && spaceshipPhysics.current) {
                 const speedKmh = spaceshipPhysics.current.getSpeedInKmh();
@@ -508,11 +509,11 @@ export function Player({ initialPosition = [0, 0, -0.05], onPositionChange, onRo
         } else {
             // 일반 모드: 기존 이동 시스템
             const direction = new THREE.Vector3();
-            
+
             if (moveForward || moveBackward || moveLeft || moveRight) {
                 // 카메라의 전체 회전을 사용하여 이동 방향 계산 (위/아래 시야 포함)
                 const quaternion = camera.quaternion.clone();
-                
+
                 if (moveForward) {
                     direction.set(0, 0, -1).applyQuaternion(quaternion);
                 }
@@ -525,15 +526,15 @@ export function Player({ initialPosition = [0, 0, -0.05], onPositionChange, onRo
                 if (moveRight) {
                     direction.set(1, 0, 0).applyQuaternion(quaternion);
                 }
-                
+
                 // 여러 방향 입력 시 정규화
                 if ((moveForward || moveBackward) && (moveLeft || moveRight)) {
                     direction.normalize();
                 }
-                
+
                 // 플레이어 모델 위치 업데이트
                 playerModelPosition.current.add(direction.clone().multiplyScalar(SPEED));
-                
+
                 // 카메라는 플레이어 모델 위치 + 눈 높이로 설정 (점프 시 함께 올라감)
                 camera.position.x = playerModelPosition.current.x;
                 camera.position.z = playerModelPosition.current.z;
@@ -557,7 +558,7 @@ export function Player({ initialPosition = [0, 0, -0.05], onPositionChange, onRo
                     isJumping.current = false;
                 }
             }
-            
+
             // 카메라는 플레이어 모델 위치 + 눈 높이로 설정 (점프 시 함께 올라감)
             camera.position.x = playerModelPosition.current.x;
             camera.position.z = playerModelPosition.current.z;
@@ -577,14 +578,14 @@ export function Player({ initialPosition = [0, 0, -0.05], onPositionChange, onRo
                 playerModelPosition.current.y + EYE_HEIGHT, // 플레이어 모델 위치 + 눈 높이
                 playerModelPosition.current.z
             ];
-        
+
         // 위치가 변경되었는지 확인 (성능 최적화를 위해 작은 변화는 무시)
         const threshold = 0.001;
-        const hasPositionChanged = 
+        const hasPositionChanged =
             Math.abs(currentPosition[0] - lastPositionRef.current[0]) > threshold ||
             Math.abs(currentPosition[1] - lastPositionRef.current[1]) > threshold ||
             Math.abs(currentPosition[2] - lastPositionRef.current[2]) > threshold;
-        
+
         if (hasPositionChanged && onPositionChangeRef.current) {
             lastPositionRef.current = currentPosition;
             onPositionChangeRef.current(currentPosition);
